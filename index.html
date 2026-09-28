@@ -62,6 +62,12 @@ button{font-family:inherit;}
   border-radius:8px;padding:10px 12px;font-size:14px;font-family:inherit;outline:none;
 }
 .input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(52,120,246,.18);}
+.password-field{position:relative;}
+.password-field .input{padding-right:46px;}
+.password-toggle{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:34px;height:34px;border:0;background:transparent;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:7px;}
+.password-toggle:hover,.password-toggle:focus-visible{color:var(--text);background:rgba(255,255,255,.05);outline:none;}
+.text-action{font-size:12.5px;color:var(--blue-light);cursor:pointer;background:none;border:0;padding:0;font-family:inherit;}
+.text-action:hover{text-decoration:underline;}
 .label{font-size:12.5px;color:var(--text-secondary);font-weight:600;margin-bottom:6px;display:block;letter-spacing:.01em;}
 .field{margin-bottom:14px;}
 .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;}
@@ -365,7 +371,7 @@ function saveUiPrefs(){
 }
 
 let state = Object.assign({
-  booting:true, authChecked:false, authError:null, authMode:'signin', authLoading:false,
+  booting:true, authChecked:false, authError:null, authMode:'signin', authLoading:false, authEmail:'',
   loggedIn:false, onboarded:false, onboardStep:1, userId:null,
   onboarding:{ empresa:'', site:'', segmento:'', cidade:'', servico:'', ticket:'', descricao:'', problema:'',
     segmentosDesejados:'', regiao:'', porte:'Pequeno e médio porte', palavrasChave:'', qtdOportunidades:'20',
@@ -437,7 +443,9 @@ async function bootAuth(){
   }
 }
 sb.auth.onAuthStateChange((event, session)=>{
-  if(event === 'SIGNED_OUT'){
+  if(event === 'PASSWORD_RECOVERY'){
+    setState({ loggedIn:false, authMode:'update', authEmail:(session&&session.user&&session.user.email)||state.authEmail, authLoading:false, authError:null, booting:false });
+  } else if(event === 'SIGNED_OUT'){
     setState({ loggedIn:false, onboarded:false, companies:[], radars:[], userId:null, booting:false });
   } else if(event === 'SIGNED_IN' && session && session.user && state.userId !== session.user.id){
     loadAllData(session.user.id);
@@ -686,22 +694,28 @@ function bindShell(){
 /* ================= LOGIN ================= */
 function renderLogin(){
   const isSignup = state.authMode==='signup';
+  const isRecover = state.authMode==='recover';
+  const isUpdate = state.authMode==='update';
+  const title = isSignup?'Criar sua conta':isRecover?'Recuperar sua senha':isUpdate?'Criar nova senha':'Entrar na plataforma';
+  const subtitle = isSignup?'Configure sua oferta e encontre as primeiras empresas reais no Google.':isRecover?'Enviaremos um link seguro para o seu e-mail.':isUpdate?'Use pelo menos 8 caracteres, com maiúscula, minúscula, número e símbolo.':'Acesse sua conta para ver as oportunidades priorizadas de hoje.';
   return `
   <div class="login-shell">
     <div class="login-form-side">
       <div class="login-box">
         <div class="sidebar-logo" style="padding:0 0 28px;"><div class="mark">${icon('zap')}</div><b style="font-size:20px;">LeadScope</b></div>
-        <h1 style="font-size:24px;margin:0 0 6px;">${isSignup ? 'Criar sua conta' : 'Entrar na plataforma'}</h1>
-        <p class="muted" style="margin:0 0 20px;font-size:13.5px;">${isSignup ? 'Configure sua oferta e encontre as primeiras empresas reais no Google.' : 'Acesse sua conta para ver as oportunidades priorizadas de hoje.'}</p>
+        <h1 style="font-size:24px;margin:0 0 6px;">${title}</h1>
+        <p class="muted" style="margin:0 0 20px;font-size:13.5px;">${subtitle}</p>
         ${state.authError ? `<div class="auth-error">${esc(state.authError)}</div>` : ''}
         ${isSignup ? `<div class="field"><label class="label">Seu nome</label><input class="input" id="loginNome" placeholder="Como podemos te chamar"></div>` : ''}
-        <div class="field"><label class="label">E-mail</label><input class="input" id="loginEmail" type="email" placeholder="voce@empresa.com.br"></div>
-        <div class="field"><label class="label">Senha</label><input class="input" type="password" id="loginPass" placeholder="Mínimo 6 caracteres"></div>
-        <button class="btn btn-primary btn-block" id="loginBtn" ${state.authLoading?'disabled':''}>${state.authLoading ? 'Aguarde...' : (isSignup ? 'Criar conta' : 'Entrar')}</button>
-        <div class="row between" style="margin-top:16px;">
+        ${!isUpdate?`<div class="field"><label class="label">E-mail</label><input class="input" id="loginEmail" type="email" autocomplete="email" value="${esc(state.authEmail)}" placeholder="voce@empresa.com.br"></div>`:''}
+        ${(!isRecover&&!isUpdate)?`<div class="field"><label class="label">Senha</label><div class="password-field"><input class="input" type="password" id="loginPass" autocomplete="${isSignup?'new-password':'current-password'}" placeholder="Mínimo 8 caracteres"><button type="button" class="password-toggle" data-toggle-password="loginPass" aria-label="Mostrar senha" title="Mostrar senha">${icon('eye')}</button></div></div>`:''}
+        ${isUpdate?`<div class="field"><label class="label">Nova senha</label><div class="password-field"><input class="input" type="password" id="newPass" autocomplete="new-password" placeholder="Mínimo 8 caracteres"><button type="button" class="password-toggle" data-toggle-password="newPass" aria-label="Mostrar senha" title="Mostrar senha">${icon('eye')}</button></div></div><div class="field"><label class="label">Repita a nova senha</label><div class="password-field"><input class="input" type="password" id="confirmPass" autocomplete="new-password" placeholder="Digite novamente"><button type="button" class="password-toggle" data-toggle-password="confirmPass" aria-label="Mostrar senha" title="Mostrar senha">${icon('eye')}</button></div></div>`:''}
+        ${(!isSignup&&!isRecover&&!isUpdate)?`<div style="text-align:right;margin:-6px 0 14px;"><button type="button" class="text-action" id="forgotPassword">Esqueci minha senha</button></div>`:''}
+        <button class="btn btn-primary btn-block" id="loginBtn" ${state.authLoading?'disabled':''}>${state.authLoading ? 'Aguarde...' : (isSignup?'Criar conta':isRecover?'Enviar link de recuperação':isUpdate?'Salvar nova senha':'Entrar')}</button>
+        ${!isUpdate?`<div class="row between" style="margin-top:16px;">
           <span class="muted" style="font-size:12.5px;">${isSignup ? 'Já tem uma conta?' : 'Ainda não tem conta?'}</span>
-          <span style="font-size:12.5px;color:var(--blue-light);cursor:pointer;" id="toggleAuthMode">${isSignup ? 'Entrar' : 'Criar conta'}</span>
-        </div>
+          <button type="button" class="text-action" id="toggleAuthMode">${isSignup||isRecover ? 'Voltar para entrar' : 'Criar conta'}</button>
+        </div>`:''}
       </div>
     </div>
     <div class="login-brand-side">
@@ -713,13 +727,46 @@ function renderLogin(){
   </div>`;
 }
 function bindLogin(){
-  document.getElementById('toggleAuthMode').addEventListener('click', ()=>{
-    setState({authMode: state.authMode==='signup' ? 'signin' : 'signup', authError:null});
+  document.querySelectorAll('[data-toggle-password]').forEach(btn=>btn.addEventListener('click',()=>{
+    const input=document.getElementById(btn.getAttribute('data-toggle-password'));
+    const visible=input.type==='text'; input.type=visible?'password':'text';
+    btn.setAttribute('aria-label',visible?'Mostrar senha':'Ocultar senha'); btn.title=visible?'Mostrar senha':'Ocultar senha';
+  }));
+  const toggle=document.getElementById('toggleAuthMode');
+  if(toggle) toggle.addEventListener('click', ()=>{
+    setState({authMode: state.authMode==='signin' ? 'signup' : 'signin', authError:null});
   });
+  const emailInput=document.getElementById('loginEmail');
+  if(emailInput) emailInput.addEventListener('input',()=>{ state.authEmail=emailInput.value; });
+  const forgot=document.getElementById('forgotPassword');
+  if(forgot) forgot.addEventListener('click',()=>setState({authMode:'recover',authEmail:(emailInput&&emailInput.value)||state.authEmail,authError:null}));
   document.getElementById('loginBtn').addEventListener('click', async ()=>{
+    if(state.authMode==='update'){
+      const pass=document.getElementById('newPass').value, confirm=document.getElementById('confirmPass').value;
+      if(pass!==confirm){ setState({authError:'As senhas não coincidem.'}); return; }
+      if(!validStrongPassword(pass)){ setState({authError:'Use 8 caracteres ou mais, com maiúscula, minúscula, número e símbolo.'}); return; }
+      setState({authLoading:true,authError:null});
+      const { error }=await sb.auth.updateUser({password:pass});
+      if(error){ setState({authLoading:false,authError:traduzErroAuth(error.message)}); return; }
+      await sb.auth.signOut();
+      setState({authMode:'signin',authLoading:false,authError:null,loggedIn:false});
+      toast('Senha atualizada. Entre novamente com a nova senha.');
+      return;
+    }
     const email = document.getElementById('loginEmail').value.trim();
+    if(state.authMode==='recover'){
+      if(!email){ setState({authError:'Informe o e-mail da sua conta.'}); return; }
+      setState({authLoading:true,authError:null});
+      const redirectTo=window.location.origin+window.location.pathname;
+      const { error }=await sb.auth.resetPasswordForEmail(email,{redirectTo});
+      if(error){ setState({authLoading:false,authError:traduzErroAuth(error.message)}); return; }
+      setState({authLoading:false,authMode:'signin',authError:null});
+      toast('Se o e-mail estiver cadastrado, enviaremos um link de recuperação.');
+      return;
+    }
     const pass = document.getElementById('loginPass').value;
     if(!email || !pass){ setState({authError:'Preencha e-mail e senha.'}); return; }
+    if(state.authMode==='signup'&&!validStrongPassword(pass)){ setState({authError:'Use 8 caracteres ou mais, com maiúscula, minúscula, número e símbolo.'}); return; }
     setState({authLoading:true, authError:null});
     try{
       if(state.authMode==='signup'){
@@ -743,11 +790,12 @@ function bindLogin(){
     }
   });
 }
+function validStrongPassword(value){ return value.length>=8 && /[a-z]/.test(value) && /[A-Z]/.test(value) && /\d/.test(value) && /[^A-Za-z0-9]/.test(value); }
 function traduzErroAuth(msg){
   if(!msg) return 'Não foi possível autenticar. Tente novamente.';
   if(/invalid login credentials/i.test(msg)) return 'E-mail ou senha incorretos.';
   if(/already registered|already exists/i.test(msg)) return 'Já existe uma conta com esse e-mail. Tente entrar.';
-  if(/password.*(6|short)/i.test(msg)) return 'A senha precisa ter pelo menos 6 caracteres.';
+  if(/weak password|password.*(8|short)|characters/i.test(msg)) return 'Use 8 caracteres ou mais, com maiúscula, minúscula, número e símbolo.';
   if(/email not confirmed/i.test(msg)) return 'Confirme seu e-mail antes de entrar (verifique sua caixa de entrada).';
   return msg;
 }
