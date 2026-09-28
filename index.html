@@ -226,6 +226,9 @@ tr.row-hover:hover{background:rgba(255,255,255,.015);}
 /* ================= CONFIG SUPABASE ================= */
 const SUPABASE_URL = "https://nlzlbrfwaloyxksaevne.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5semxicmZ3YWxveXhrc2Fldm5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNDA2ODYsImV4cCI6MjEwNTkxNjY4Nn0.7F7Unr0P7htudpx6NX7vdFz3ADLOcMganuDNjotDXIM";
+const recoveryHash = new URLSearchParams(window.location.hash.slice(1));
+const recoveryQuery = new URLSearchParams(window.location.search);
+let passwordRecoveryPending = recoveryHash.get('type') === 'recovery' || recoveryQuery.get('type') === 'recovery';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* ================= DATA MODEL ================= */
@@ -371,7 +374,7 @@ function saveUiPrefs(){
 }
 
 let state = Object.assign({
-  booting:true, authChecked:false, authError:null, authMode:'signin', authLoading:false, authEmail:'',
+  booting:true, authChecked:false, authError:null, authMode:passwordRecoveryPending?'update':'signin', authLoading:false, authEmail:'',
   loggedIn:false, onboarded:false, onboardStep:1, userId:null,
   onboarding:{ empresa:'', site:'', segmento:'', cidade:'', servico:'', ticket:'', descricao:'', problema:'',
     segmentosDesejados:'', regiao:'', porte:'Pequeno e médio porte', palavrasChave:'', qtdOportunidades:'20',
@@ -436,6 +439,13 @@ async function persistCompanyField(id, fields){
 /* ================= AUTENTICAÇÃO (Supabase Auth) ================= */
 async function bootAuth(){
   const { data: { session } } = await sb.auth.getSession();
+  if(passwordRecoveryPending){
+    const email=(session&&session.user&&session.user.email)||state.authEmail;
+    const authError=session?'': 'Este link de recuperação expirou ou já foi utilizado. Solicite um novo link.';
+    history.replaceState({},document.title,window.location.pathname);
+    setState({ booting:false, authChecked:true, loggedIn:false, authMode:'update', authEmail:email, authError });
+    return;
+  }
   if(session && session.user){
     await loadAllData(session.user.id);
   } else {
@@ -444,11 +454,16 @@ async function bootAuth(){
 }
 sb.auth.onAuthStateChange((event, session)=>{
   if(event === 'PASSWORD_RECOVERY'){
+    passwordRecoveryPending=true;
     setState({ loggedIn:false, authMode:'update', authEmail:(session&&session.user&&session.user.email)||state.authEmail, authLoading:false, authError:null, booting:false });
   } else if(event === 'SIGNED_OUT'){
     setState({ loggedIn:false, onboarded:false, companies:[], radars:[], userId:null, booting:false });
-  } else if(event === 'SIGNED_IN' && session && session.user && state.userId !== session.user.id){
-    loadAllData(session.user.id);
+  } else if(event === 'SIGNED_IN' && session && session.user){
+    if(passwordRecoveryPending){
+      setState({ loggedIn:false, authMode:'update', authEmail:session.user.email||state.authEmail, authLoading:false, authError:null, booting:false });
+    } else if(state.userId !== session.user.id){
+      loadAllData(session.user.id);
+    }
   }
 });
 
@@ -712,6 +727,7 @@ function renderLogin(){
         ${isUpdate?`<div class="field"><label class="label">Nova senha</label><div class="password-field"><input class="input" type="password" id="newPass" autocomplete="new-password" placeholder="Mínimo 8 caracteres"><button type="button" class="password-toggle" data-toggle-password="newPass" aria-label="Mostrar senha" title="Mostrar senha">${icon('eye')}</button></div></div><div class="field"><label class="label">Repita a nova senha</label><div class="password-field"><input class="input" type="password" id="confirmPass" autocomplete="new-password" placeholder="Digite novamente"><button type="button" class="password-toggle" data-toggle-password="confirmPass" aria-label="Mostrar senha" title="Mostrar senha">${icon('eye')}</button></div></div>`:''}
         ${(!isSignup&&!isRecover&&!isUpdate)?`<div style="text-align:right;margin:-6px 0 14px;"><button type="button" class="text-action" id="forgotPassword">Esqueci minha senha</button></div>`:''}
         <button class="btn btn-primary btn-block" id="loginBtn" ${state.authLoading?'disabled':''}>${state.authLoading ? 'Aguarde...' : (isSignup?'Criar conta':isRecover?'Enviar link de recuperação':isUpdate?'Salvar nova senha':'Entrar')}</button>
+        ${isUpdate?`<div style="text-align:center;margin-top:16px;"><button type="button" class="text-action" id="requestNewRecovery">Solicitar outro link de recuperação</button></div>`:''}
         ${!isUpdate?`<div class="row between" style="margin-top:16px;">
           <span class="muted" style="font-size:12.5px;">${isSignup ? 'Já tem uma conta?' : 'Ainda não tem conta?'}</span>
           <button type="button" class="text-action" id="toggleAuthMode">${isSignup||isRecover ? 'Voltar para entrar' : 'Criar conta'}</button>
@@ -740,6 +756,11 @@ function bindLogin(){
   if(emailInput) emailInput.addEventListener('input',()=>{ state.authEmail=emailInput.value; });
   const forgot=document.getElementById('forgotPassword');
   if(forgot) forgot.addEventListener('click',()=>setState({authMode:'recover',authEmail:(emailInput&&emailInput.value)||state.authEmail,authError:null}));
+  const requestNew=document.getElementById('requestNewRecovery');
+  if(requestNew) requestNew.addEventListener('click',()=>{
+    passwordRecoveryPending=false;
+    setState({authMode:'recover',authError:null,authLoading:false});
+  });
   document.getElementById('loginBtn').addEventListener('click', async ()=>{
     if(state.authMode==='update'){
       const pass=document.getElementById('newPass').value, confirm=document.getElementById('confirmPass').value;
@@ -748,6 +769,8 @@ function bindLogin(){
       setState({authLoading:true,authError:null});
       const { error }=await sb.auth.updateUser({password:pass});
       if(error){ setState({authLoading:false,authError:traduzErroAuth(error.message)}); return; }
+      passwordRecoveryPending=false;
+      history.replaceState({},document.title,window.location.pathname);
       await sb.auth.signOut();
       setState({authMode:'signin',authLoading:false,authError:null,loggedIn:false});
       toast('Senha atualizada. Entre novamente com a nova senha.');
@@ -1721,7 +1744,7 @@ document.addEventListener('click', (e)=>{
   }
 });
 
-if(location.hash) state.route = location.hash;
+if(location.hash && !passwordRecoveryPending) state.route = location.hash;
 bootAuth();
 // fix initial active class for configuracoes on first paint
 setTimeout(()=>{
