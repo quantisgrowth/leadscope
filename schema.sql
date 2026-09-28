@@ -1,5 +1,8 @@
 -- ============================================================
--- LeadScope — Schema Supabase
+-- LeadScope — Schema inicial legado
+-- Para a versão atual, execute também as migrações em supabase/migrations
+-- usando `supabase db push`. O fluxo antigo abaixo é mantido apenas para
+-- compatibilidade com instalações já existentes.
 -- Rode este script inteiro no SQL Editor do seu projeto Supabase
 -- (Dashboard > SQL Editor > New query > colar > Run)
 -- ============================================================

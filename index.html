@@ -231,6 +231,7 @@ const SCORES = [92,88,85,81,78,74,71,68,65,61,58,55,52,48,45,38,34,29,22,15];
 const STATUSES = ['Nova','Nova','Em análise','Priorizada','Nova','Abordagem preparada','Contatada','Nova','Respondeu','Priorizada','Em análise','Nova','Reunião agendada','Nova','Contatada','Descartada','Nova','Cliente','Nova','Em análise'];
 
 const SIGNAL_POOL = [
+  {key:'semSite', texto:'Site não encontrado no Perfil da Empresa no Google', fonte:'Google Places', interpretacao:'Pode indicar uma oportunidade clara de criação ou estruturação da presença digital', servico:3},
   {key:'agendamento', texto:'Site não possui sistema de agendamento online visível', fonte:'Site institucional', interpretacao:'Pode indicar dificuldade na jornada de agendamento e possível perda de contatos interessados', servico:0},
   {key:'formulario', texto:'Formulário de contato apresentou erro ao ser testado', fonte:'Site institucional', interpretacao:'Pode indicar perda de leads que tentam iniciar contato pelo site', servico:1},
   {key:'perfilIncompleto', texto:'Perfil comercial possui informações incompletas (horário ou categoria)', fonte:'Perfil comercial', interpretacao:'Pode indicar presença digital sem manutenção recorrente', servico:4},
@@ -262,6 +263,7 @@ function sinaisFromKeys(keys){ return (keys||[]).map(k=>SIGNAL_POOL.find(s=>s.ke
 // Converte uma linha da tabela `empresas` (+ suas `evidencias`) no formato que as telas usam.
 function rowToCompany(row, evidenciaRows){
   const sinais = sinaisFromKeys(row.sinais_keys);
+  if(!sinais.length) sinais.push({key:'perfilGoogle', texto:'Perfil público localizado e validado no Google', fonte:'Google Places', interpretacao:'Há dados públicos suficientes para iniciar uma qualificação comercial', servico:4});
   const evidencias = (evidenciaRows||[]).map(e=>({
     texto:e.texto, fonte:e.fonte,
     data: e.data ? fmtDate(new Date(e.data+'T00:00:00')) : '',
@@ -403,15 +405,19 @@ async function loadAllData(userId){
       cargo: (profile&&profile.cargo) || 'Head Comercial' },
     onboarding: ob,
     onboarded: !!(settings && settings.onboarded),
+    onboardStep: Math.max(1, Math.min(3, Number((settings&&settings.onboarding_step)||1))),
     companies,
-    radars: (radaresRows||[]).map(r=>({id:r.id, nome:r.nome, segmento:r.segmento, cidade:r.cidade, criadoEm: r.criado_em ? fmtDate(new Date(r.criado_em+'T00:00:00')) : ''})),
+    radars: (radaresRows||[]).map(r=>({id:r.id, nome:r.nome, segmento:r.segmento, cidade:r.cidade, query:r.query, localizacao:r.localizacao, status:r.status||'pendente', criadoEm: r.criado_em ? fmtDate(new Date(r.criado_em+'T00:00:00')) : ''})),
     loggedIn:true, booting:false,
   });
 }
 
-async function persistOnboarding(){
+async function persistOnboarding(completed){
   if(!state.userId) return;
-  await sb.from('account_settings').update(Object.assign(onboardingToRow(state.onboarding), {onboarded:true, updated_at:new Date().toISOString()})).eq('user_id', state.userId);
+  const { error } = await sb.from('account_settings').update(Object.assign(onboardingToRow(state.onboarding), {
+    onboarding_step:state.onboardStep, onboarded:!!completed, updated_at:new Date().toISOString()
+  })).eq('user_id', state.userId);
+  if(error) throw error;
 }
 async function persistSettingsPartial(){
   if(!state.userId) return;
@@ -686,7 +692,7 @@ function renderLogin(){
       <div class="login-box">
         <div class="sidebar-logo" style="padding:0 0 28px;"><div class="mark">${icon('zap')}</div><b style="font-size:20px;">LeadScope</b></div>
         <h1 style="font-size:24px;margin:0 0 6px;">${isSignup ? 'Criar sua conta' : 'Entrar na plataforma'}</h1>
-        <p class="muted" style="margin:0 0 20px;font-size:13.5px;">${isSignup ? 'Sua conta já nasce com um radar e 20 oportunidades de demonstração.' : 'Acesse sua conta para ver as oportunidades priorizadas de hoje.'}</p>
+        <p class="muted" style="margin:0 0 20px;font-size:13.5px;">${isSignup ? 'Configure sua oferta e encontre as primeiras empresas reais no Google.' : 'Acesse sua conta para ver as oportunidades priorizadas de hoje.'}</p>
         ${state.authError ? `<div class="auth-error">${esc(state.authError)}</div>` : ''}
         ${isSignup ? `<div class="field"><label class="label">Seu nome</label><input class="input" id="loginNome" placeholder="Como podemos te chamar"></div>` : ''}
         <div class="field"><label class="label">E-mail</label><input class="input" id="loginEmail" type="email" placeholder="voce@empresa.com.br"></div>
@@ -749,55 +755,48 @@ function traduzErroAuth(msg){
 /* ================= ONBOARDING ================= */
 function renderOnboarding(){
   const s = state.onboardStep, ob = state.onboarding;
-  const steps = ['Sobre sua empresa','Oferta comercial','Cliente ideal','Critérios de prioridade'];
+  const steps = ['Sua operação','Cliente ideal','Revisar e começar'];
   let inner = '';
   if(s===1){
     inner = `
       <div class="field"><label class="label">Nome da empresa</label><input class="input" id="f_empresa" value="${esc(ob.empresa)}" placeholder="Ex: Quantis Growth"></div>
-      <div class="field"><label class="label">Site</label><input class="input" id="f_site" value="${esc(ob.site)}" placeholder="www.suaempresa.com.br"></div>
       <div class="grid" style="grid-template-columns:1fr 1fr;">
-        <div class="field"><label class="label">Segmento</label><input class="input" id="f_segmento" value="${esc(ob.segmento)}" placeholder="Ex: Agência de marketing"></div>
-        <div class="field"><label class="label">Cidade e estado</label><input class="input" id="f_cidade" value="${esc(ob.cidade)}" placeholder="Ex: Sorocaba, SP"></div>
-      </div>`;
+        <div class="field"><label class="label">Seu segmento</label><input class="input" id="f_segmento" value="${esc(ob.segmento)}" placeholder="Ex: Agência de marketing"></div>
+        <div class="field"><label class="label">Site (opcional)</label><input class="input" id="f_site" value="${esc(ob.site)}" placeholder="www.suaempresa.com.br"></div>
+      </div>
+      <div class="field"><label class="label">O que você vende?</label><input class="input" id="f_servico" value="${esc(ob.servico)}" placeholder="Ex: Gestão de reputação digital"></div>
+      <div class="field"><label class="label">Qual resultado entrega?</label><input class="input" id="f_problema" value="${esc(ob.problema)}" placeholder="Ex: Mais agendamentos qualificados"></div>`;
   } else if(s===2){
     inner = `
-      <div class="field"><label class="label">Serviço principal vendido</label><input class="input" id="f_servico" value="${esc(ob.servico)}" placeholder="Ex: Gestão de reputação digital"></div>
-      <div class="field"><label class="label">Ticket médio</label><input class="input" id="f_ticket" value="${esc(ob.ticket)}" placeholder="Ex: R$ 1.500/mês"></div>
-      <div class="field"><label class="label">Breve descrição da oferta</label><textarea class="input" id="f_descricao" rows="3" placeholder="Como você descreveria sua oferta em poucas palavras?">${esc(ob.descricao)}</textarea></div>
-      <div class="field"><label class="label">Principal problema resolvido</label><input class="input" id="f_problema" value="${esc(ob.problema)}" placeholder="Ex: Falta de agendamentos qualificados"></div>`;
-  } else if(s===3){
-    inner = `
-      <div class="field"><label class="label">Segmentos desejados</label><input class="input" id="f_segdes" value="${esc(ob.segmentosDesejados)}" placeholder="Ex: Clínicas odontológicas, estéticas"></div>
+      <div class="field"><label class="label">Que tipo de empresa quer encontrar?</label><input class="input" id="f_segdes" value="${esc(ob.segmentosDesejados)}" placeholder="Ex: Clínicas odontológicas"></div>
       <div class="grid" style="grid-template-columns:1fr 1fr;">
-        <div class="field"><label class="label">Região</label><input class="input" id="f_regiao" value="${esc(ob.regiao)}" placeholder="Ex: Sorocaba e região"></div>
+        <div class="field"><label class="label">Cidade ou região</label><input class="input" id="f_regiao" value="${esc(ob.regiao)}" placeholder="Ex: Sorocaba, SP"></div>
         <div class="field"><label class="label">Porte das empresas</label>
           <select class="input" id="f_porte">
             ${['Pequeno porte','Pequeno e médio porte','Médio porte','Médio e grande porte'].map(p=>`<option ${ob.porte===p?'selected':''}>${p}</option>`).join('')}
           </select>
         </div>
       </div>
-      <div class="field"><label class="label">Palavras-chave</label><input class="input" id="f_palavras" value="${esc(ob.palavrasChave)}" placeholder="Ex: odontologia, clínica, dentista"></div>
-      <div class="field"><label class="label">Quantidade desejada de oportunidades</label><input class="input" id="f_qtd" value="${esc(ob.qtdOportunidades)}" placeholder="Ex: 20"></div>`;
-  } else if(s===4){
-    const criterios = [['google','Qualidade do perfil no Google'],['site','Qualidade do site'],['reputacao','Reputação e avaliações'],['contato','Facilidade de contato'],['presenca','Presença digital'],['compatibilidade','Compatibilidade com a oferta'],['urgencia','Sinais de urgência']];
-    inner = criterios.map(([k,label])=>`
-      <div class="field">
-        <div class="row between" style="margin-bottom:6px;"><label class="label" style="margin:0;">${label}</label><span class="muted" style="font-size:12.5px;" id="v_${k}">${ob.pesos[k]}%</span></div>
-        <input type="range" class="slider" min="0" max="100" value="${ob.pesos[k]}" data-peso="${k}">
-      </div>`).join('');
+      <div class="field"><label class="label">Palavras-chave complementares (opcional)</label><input class="input" id="f_palavras" value="${esc(ob.palavrasChave)}" placeholder="Ex: implante, ortodontia"></div>
+      <div class="field"><label class="label">Quantidade inicial</label><select class="input" id="f_qtd">${[5,10,15,20].map(n=>`<option value="${n}" ${String(ob.qtdOportunidades)===String(n)?'selected':''}>${n} empresas</option>`).join('')}</select></div>`;
+  } else {
+    inner = `<div class="badge badge-blue" style="display:block;padding:12px;margin-bottom:18px;">Tudo pronto para criar seu primeiro radar com dados públicos do Google.</div>
+      ${kv('Sua empresa', ob.empresa)}${kv('Oferta', ob.servico)}${kv('Resultado entregue', ob.problema)}
+      ${kv('Empresas buscadas', ob.segmentosDesejados)}${kv('Localização', ob.regiao)}${kv('Quantidade', ob.qtdOportunidades+' empresas')}
+      <p class="muted" style="font-size:12px;margin-top:16px;">Os pesos avançados do score continuam disponíveis em Configurações.</p>`;
   }
   return `
   <div class="onb-shell">
-    <div class="onb-progress">${[1,2,3,4].map(i=>`<div class="seg ${i<=s?'done':''}"></div>`).join('')}</div>
+    <div class="onb-progress">${[1,2,3].map(i=>`<div class="seg ${i<=s?'done':''}"></div>`).join('')}</div>
     <div class="onb-card card">
-      <div class="step-badge">ETAPA ${s} DE 4</div>
+      <div class="step-badge">ETAPA ${s} DE 3</div>
       <h2 style="margin:0 0 4px;font-size:20px;">${steps[s-1]}</h2>
-      <p class="muted" style="margin:0 0 22px;font-size:13.5px;">${s===4?'Escolha a importância de cada critério para calcular o LeadScope Score.':'Essas informações ajudam a priorizar as oportunidades certas para você.'}</p>
+      <p class="muted" style="margin:0 0 22px;font-size:13.5px;">Responda apenas o necessário para encontrar as primeiras oportunidades.</p>
       ${inner}
       <div class="divider"></div>
       <div class="row between">
         <button class="btn ${s===1?'btn-ghost':''}" id="obBack" ${s===1?'style="visibility:hidden"':''}>${icon('arrow',)} Voltar</button>
-        <button class="btn btn-primary" id="obNext">${s===4?'Criar meu primeiro radar':'Continuar'}</button>
+        <button class="btn btn-primary" id="obNext">${s===3?'Configurar primeiro radar':'Salvar e continuar'}</button>
       </div>
     </div>
   </div>`;
@@ -812,28 +811,19 @@ function bindOnboarding(){
   });
   const porte = document.getElementById('f_porte');
   if(porte) porte.addEventListener('change', ()=>{ ob.porte = porte.value; });
-  document.querySelectorAll('[data-peso]').forEach(sl=>{
-    sl.addEventListener('input', ()=>{
-      const k = sl.getAttribute('data-peso');
-      ob.pesos[k] = +sl.value;
-      document.getElementById('v_'+k).textContent = sl.value+'%';
-    });
-  });
   const back = document.getElementById('obBack');
   if(back) back.addEventListener('click', ()=> setState({onboardStep: Math.max(1, state.onboardStep-1)}));
   document.getElementById('obNext').addEventListener('click', async ()=>{
-    if(state.onboardStep<4){ setState({onboardStep: state.onboardStep+1}); }
-    else {
-      const btn = document.getElementById('obNext');
-      btn.disabled = true; btn.textContent = 'Salvando...';
-      try{
-        await persistOnboarding();
-        setState({onboarded:true, route:'#/overview'});
-        toast('Radar "Clínicas odontológicas — '+CITY+'" criado com sucesso.');
-      }catch(e){
-        btn.disabled=false; btn.textContent='Criar meu primeiro radar';
-        toast('Não foi possível salvar agora. Tente novamente.');
-      }
+    const required = state.onboardStep===1 ? [ob.empresa,ob.servico,ob.problema] : state.onboardStep===2 ? [ob.segmentosDesejados,ob.regiao] : [];
+    if(required.some(v=>!String(v||'').trim())){ toast('Preencha os campos principais para continuar.'); return; }
+    const btn = document.getElementById('obNext');
+    btn.disabled = true; btn.textContent = 'Salvando...';
+    try{
+      if(state.onboardStep<3){ state.onboardStep++; await persistOnboarding(false); setState({}); }
+      else { await persistOnboarding(true); state.onboarded=true; navigate('#/radar'); setState({}); toast('Configuração salva. Agora execute seu primeiro radar.'); }
+    }catch(e){
+      btn.disabled=false; btn.textContent=state.onboardStep===3?'Configurar primeiro radar':'Salvar e continuar';
+      toast('Não foi possível salvar agora. Tente novamente.');
     }
   });
 }
@@ -922,35 +912,26 @@ function renderOverview(){
 
 /* ================= RADAR ================= */
 function renderRadar(){
+  const ob=state.onboarding;
+  const segmento=(ob.segmentosDesejados||'').split(',')[0].trim();
   return `
   <h1 class="page-title">Radar</h1>
   <p class="page-sub">Configure uma nova busca para encontrar empresas com necessidades comerciais verificáveis.</p>
   <div class="grid" style="grid-template-columns:1.3fr .9fr;align-items:start;">
     <div class="card">
       <div class="card-title">Novo radar</div>
-      <p class="card-sub">Dados demonstrativos — nenhuma coleta automatizada é realizada nesta versão.</p>
-      <div class="field"><label class="label">Nome do radar</label><input class="input" id="rNome" placeholder="Ex: Clínicas odontológicas — Sorocaba" value="Clínicas odontológicas — ${CITY}"></div>
+      <p class="card-sub">Busca empresas reais no Google e registra apenas dados públicos verificáveis.</p>
+      <div class="field"><label class="label">Nome do radar</label><input class="input" id="rNome" placeholder="Ex: Clínicas odontológicas — Sorocaba" value="${esc(segmento+(ob.regiao?' — '+ob.regiao:''))}"></div>
       <div class="grid" style="grid-template-columns:1fr 1fr;">
-        <div class="field"><label class="label">Segmento</label><input class="input" value="Clínica Odontológica"></div>
-        <div class="field"><label class="label">Serviço que será oferecido</label><input class="input" value="${esc(state.onboarding.servico)||'Gestão de reputação e presença digital'}"></div>
+        <div class="field"><label class="label">Segmento ou tipo de empresa</label><input class="input" id="rSegmento" value="${esc(segmento)}" placeholder="Ex: Clínica odontológica"></div>
+        <div class="field"><label class="label">Serviço que será oferecido</label><input class="input" id="rServico" value="${esc(ob.servico)}" readonly></div>
       </div>
-      <div class="grid" style="grid-template-columns:1fr 1fr 1fr;">
-        <div class="field"><label class="label">Cidade</label><input class="input" value="Sorocaba"></div>
-        <div class="field"><label class="label">Estado</label><input class="input" value="SP"></div>
-        <div class="field"><label class="label">Raio / região</label><input class="input" value="15 km"></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;">
+        <div class="field"><label class="label">Cidade ou região</label><input class="input" id="rLocalizacao" value="${esc(ob.regiao)}" placeholder="Ex: Sorocaba, SP"></div>
+        <div class="field"><label class="label">Raio de referência</label><select class="input" id="rRaio"><option value="5000">5 km</option><option value="15000" selected>15 km</option><option value="30000">30 km</option></select></div>
       </div>
-      <div class="field"><label class="label">Palavras-chave</label><input class="input" value="odontologia, clínica, dentista"></div>
-      <div class="field"><label class="label">Quantidade de resultados</label><input class="input" value="20"></div>
-      <div class="divider"></div>
-      <div class="card-title" style="font-size:13.5px;">Filtros opcionais</div>
-      <div class="grid" style="grid-template-columns:1fr 1fr;margin-bottom:6px;">
-        <div class="field"><label class="label">Nota mínima</label><input class="input" placeholder="Ex: 3.0"></div>
-        <div class="field"><label class="label">Nota máxima</label><input class="input" placeholder="Ex: 5.0"></div>
-      </div>
-      <div class="field"><label class="label">Quantidade mínima de avaliações</label><input class="input" placeholder="Ex: 10"></div>
-      <div class="pill-group" style="margin-bottom:14px;">
-        ${['Possui site','Possui telefone','Possui WhatsApp','Possui redes sociais','Possui agendamento','Site com problemas','Perfil incompleto','Avaliações recentes negativas'].map((f,i)=>`<span class="pill ${i%3===1?'active':''}">${f}</span>`).join('')}
-      </div>
+      <div class="field"><label class="label">Termos complementares (opcional)</label><input class="input" id="rPalavras" value="${esc(ob.palavrasChave)}" placeholder="Ex: implante, ortodontia"></div>
+      <div class="field"><label class="label">Quantidade de resultados</label><select class="input" id="rQuantidade">${[5,10,15,20].map(n=>`<option value="${n}" ${String(ob.qtdOportunidades)===String(n)?'selected':''}>${n} empresas</option>`).join('')}</select></div>
       <button class="btn btn-primary btn-block" id="runRadar">${icon('radar')} Analisar oportunidades</button>
     </div>
     <div class="card">
@@ -959,7 +940,7 @@ function renderRadar(){
         <div style="padding:12px 0;border-top:1px solid var(--border);">
           <div style="font-weight:600;font-size:13.5px;">${r.nome}</div>
           <div class="muted" style="font-size:12px;">${r.segmento} · ${r.cidade}</div>
-          <div class="muted" style="font-size:11.5px;margin-top:4px;">Criado em ${r.criadoEm}</div>
+          <div class="row between" style="margin-top:4px;"><span class="muted" style="font-size:11.5px;">Criado em ${r.criadoEm}</span><span class="badge ${r.status==='concluido'?'badge-blue':'badge-gray'}">${r.status}</span></div>
         </div>`).join('')}
       <div class="divider"></div>
       <div class="empty" style="padding:24px 8px;">
@@ -974,10 +955,17 @@ function renderRadar(){
 function bindRadarProcessing(){
   const btn = document.getElementById('runRadar');
   if(!btn) return;
-  btn.addEventListener('click', ()=>{
+  btn.addEventListener('click', async ()=>{
+    const nome=document.getElementById('rNome').value.trim();
+    const segmento=document.getElementById('rSegmento').value.trim();
+    const localizacao=document.getElementById('rLocalizacao').value.trim();
+    const palavras=document.getElementById('rPalavras').value.trim();
+    const limite=Number(document.getElementById('rQuantidade').value)||20;
+    const raio=Number(document.getElementById('rRaio').value)||15000;
+    if(!nome||!segmento||!localizacao){ toast('Informe o nome, o segmento e a localização do radar.'); return; }
     const steps = ['Localizando empresas','Verificando presença digital','Analisando site e avaliações','Calculando potencial comercial','Preparando recomendações'];
     const wrap = document.getElementById('processingModalWrap');
-    let i=0;
+    let i=0, timer;
     function paint(){
       wrap.innerHTML = `
       <div style="position:fixed;inset:0;background:rgba(3,6,10,.7);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;">
@@ -994,24 +982,25 @@ function bindRadarProcessing(){
       </div>`;
     }
     paint();
-    const t = setInterval(async ()=>{
-      i++;
-      if(i>steps.length){
-        clearInterval(t); wrap.innerHTML='';
-        try{
-          const nomeInput = document.getElementById('rNome');
-          const nome = (nomeInput && nomeInput.value) || ('Radar '+fmtDate(new Date()));
-          if(state.userId){
-            const { data } = await sb.from('radares').insert({ user_id: state.userId, nome, segmento:'Clínica Odontológica', cidade: CITY }).select().maybeSingle();
-            if(data) state.radars.unshift({id:data.id, nome:data.nome, segmento:data.segmento, cidade:data.cidade, criadoEm: fmtDate(new Date())});
-          }
-        }catch(e){}
-        toast('Radar concluído: '+state.companies.length+' oportunidades analisadas.');
-        navigate('#/oportunidades');
-        return;
-      }
-      paint();
-    }, 700);
+    timer=setInterval(()=>{ i=Math.min(i+1,steps.length-1); paint(); },900);
+    try{
+      const query=[segmento,palavras].filter(Boolean).join(' ');
+      const { data:radar, error:radarError }=await sb.from('radares').insert({
+        user_id:state.userId,nome,segmento,cidade:localizacao,query,localizacao,raio_metros:raio,
+        limite_resultados:limite,status:'pendente',fonte:'google_places'
+      }).select().single();
+      if(radarError) throw radarError;
+      const { data, error }=await sb.functions.invoke('search-google-places',{body:{radar_id:radar.id,query,location:localizacao,result_limit:limite}});
+      if(error) throw error;
+      if(data&&data.error) throw new Error(data.error);
+      clearInterval(timer); wrap.innerHTML='';
+      await loadAllData(state.userId);
+      toast('Radar concluído: '+Number((data&&data.found)||0)+' empresas encontradas.');
+      navigate('#/oportunidades');
+    }catch(e){
+      clearInterval(timer); wrap.innerHTML='';
+      toast('Não foi possível concluir o radar: '+(e.message||'tente novamente.'));
+    }
   });
 }
 
