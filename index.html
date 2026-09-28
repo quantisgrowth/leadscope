@@ -1,0 +1,1697 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LeadScope — Inteligência comercial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#05070A;
+  --surface:#071827;
+  --card:#0D1D2A;
+  --blue:#3478F6;
+  --blue-light:#66A3FF;
+  --text:#F5F7FA;
+  --text-secondary:#87919C;
+  --border:#1D3344;
+  --warn:#F59E0B;
+  --error:#EF4444;
+  --radius:12px;
+  --gray-badge:#2A3B48;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-sizing:border-box;
+}
+*,*::before,*::after{box-sizing:border-box;}
+html{scroll-padding-top: env(safe-area-inset-top, 0px);}
+html,body{height:100%;}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4,.font-head{font-family:'Manrope',Inter,system-ui,sans-serif;}
+a{color:inherit;}
+button{font-family:inherit;}
+::selection{background:rgba(52,120,246,.35);}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-thumb{background:#152531;border-radius:8px;}
+::-webkit-scrollbar-track{background:transparent;}
+
+/* ---------- utility ---------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:10px 16px;border-radius:8px;border:1px solid var(--border);
+  background:transparent;color:var(--text);font-size:14px;font-weight:600;
+  cursor:pointer;transition:background .15s,border-color .15s,transform .1s;
+  white-space:nowrap;
+}
+.btn:active{transform:translateY(1px);}
+.btn:hover{border-color:#2a4457;background:rgba(255,255,255,.03);}
+.btn-primary{background:var(--blue);border-color:var(--blue);color:#fff;}
+.btn-primary:hover{background:#2864e0;border-color:#2864e0;}
+.btn-ghost{border-color:transparent;}
+.btn-sm{padding:6px 10px;font-size:12.5px;border-radius:7px;}
+.btn-block{width:100%;}
+.btn[disabled]{opacity:.45;cursor:not-allowed;}
+.input, select.input, textarea.input{
+  width:100%;background:#08131c;border:1px solid var(--border);color:var(--text);
+  border-radius:8px;padding:10px 12px;font-size:14px;font-family:inherit;outline:none;
+}
+.input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(52,120,246,.18);}
+.label{font-size:12.5px;color:var(--text-secondary);font-weight:600;margin-bottom:6px;display:block;letter-spacing:.01em;}
+.field{margin-bottom:14px;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;}
+.card-title{font-size:15px;font-weight:700;margin:0 0 4px;}
+.card-sub{font-size:13px;color:var(--text-secondary);margin:0 0 14px;}
+.muted{color:var(--text-secondary);}
+.row{display:flex;align-items:center;}
+.gap-8{gap:8px;} .gap-12{gap:12px;} .gap-16{gap:16px;}
+.between{justify-content:space-between;}
+.wrap{flex-wrap:wrap;}
+.grid{display:grid;gap:16px;}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--border);color:var(--text-secondary);background:rgba(255,255,255,.02);}
+.badge-blue{background:rgba(52,120,246,.14);border-color:rgba(52,120,246,.35);color:var(--blue-light);}
+.badge-warn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.35);color:var(--warn);}
+.badge-error{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.35);color:#ff8080;}
+.badge-gray{background:rgba(135,145,156,.12);}
+.divider{height:1px;background:var(--border);margin:16px 0;border:none;}
+.icon{width:18px;height:18px;flex:0 0 auto;display:inline-block;}
+.skeleton{background:linear-gradient(90deg,#0c1c28 25%,#122535 37%,#0c1c28 63%);background-size:400% 100%;animation:sk 1.4s ease infinite;border-radius:6px;}
+@keyframes sk{0%{background-position:100% 50%}100%{background-position:0 50%}}
+.tooltip{position:relative;}
+.tooltip:hover .tooltip-bubble{opacity:1;transform:translateY(0) translateX(-50%);pointer-events:auto;}
+.tooltip-bubble{position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateY(4px) translateX(-50%);
+  background:#0c1e2c;border:1px solid var(--border);color:var(--text);font-size:12px;font-weight:500;
+  padding:8px 10px;border-radius:8px;white-space:nowrap;opacity:0;transition:.15s;z-index:40;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.4);}
+.toast-wrap{position:fixed;top:calc(20px + env(safe-area-inset-top,0px));right:20px;z-index:300;display:flex;flex-direction:column;gap:10px;max-width:360px;width:calc(100% - 40px);pointer-events:none;}
+.toast{background:#0c1e2c;border:1px solid var(--border);border-left:3px solid var(--blue);padding:13px 16px;border-radius:9px;font-size:13.5px;font-weight:500;box-shadow:0 14px 34px rgba(0,0,0,.5);animation:toastin .22s cubic-bezier(.2,.9,.3,1.2);display:flex;align-items:flex-start;gap:10px;pointer-events:auto;position:relative;overflow:hidden;}
+.toast .toast-check{width:20px;height:20px;border-radius:50%;background:rgba(52,120,246,.18);color:var(--blue-light);display:flex;align-items:center;justify-content:center;flex:0 0 auto;margin-top:1px;}
+.toast .toast-check svg{width:12px;height:12px;}
+.toast .toast-bar{position:absolute;left:0;bottom:0;height:2px;background:var(--blue);animation:toastbar 3.2s linear forwards;}
+@keyframes toastin{from{opacity:0;transform:translateY(-10px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes toastbar{from{width:100%}to{width:0%}}
+@media (max-width:520px){.toast-wrap{right:10px;left:10px;width:auto;max-width:none;}}
+.btn-flash{background:var(--blue) !important;border-color:var(--blue) !important;color:#fff !important;}
+.empty{text-align:center;padding:48px 20px;color:var(--text-secondary);}
+.empty h4{color:var(--text);margin:10px 0 6px;font-size:15px;}
+.empty p{margin:0 0 16px;font-size:13.5px;}
+.slider{-webkit-appearance:none;width:100%;height:5px;border-radius:4px;background:var(--border);outline:none;}
+.slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--blue);cursor:pointer;border:2px solid #0a1a26;}
+.slider::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--blue);cursor:pointer;border:2px solid #0a1a26;}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);overflow-x:auto;}
+.tab{padding:10px 14px;font-size:13.5px;font-weight:600;color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;}
+.tab.active{color:var(--text);border-color:var(--blue);}
+.checkbox-row{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--text-secondary);padding:6px 0;}
+.checkbox-row input{accent-color:var(--blue);width:15px;height:15px;}
+table{width:100%;border-collapse:collapse;font-size:13.5px;}
+th{text-align:left;color:var(--text-secondary);font-weight:600;font-size:12px;text-transform:none;padding:10px 12px;border-bottom:1px solid var(--border);white-space:nowrap;}
+td{padding:12px;border-bottom:1px solid var(--border);vertical-align:middle;}
+tr.row-hover:hover{background:rgba(255,255,255,.015);}
+.table-scroll{overflow-x:auto;}
+.avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--blue),#1b3d6d);display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;color:#fff;flex:0 0 auto;}
+.donut-label{font-family:'Manrope';font-weight:800;}
+.pill-group{display:flex;gap:6px;flex-wrap:wrap;}
+.pill{padding:6px 12px;border-radius:999px;border:1px solid var(--border);font-size:12.5px;cursor:pointer;color:var(--text-secondary);background:transparent;}
+.pill.active{background:rgba(52,120,246,.14);border-color:var(--blue);color:var(--blue-light);}
+
+/* ---------- app shell ---------- */
+.app-shell{display:flex;min-height:100vh;}
+.sidebar{
+  width:256px;background:var(--surface);border-right:1px solid var(--border);
+  position:fixed;top:0;left:0;bottom:0;display:flex;flex-direction:column;
+  padding-top:calc(20px + env(safe-area-inset-top,0px));z-index:50;transition:transform .2s ease;
+}
+.sidebar-logo{padding:0 22px 22px;display:flex;align-items:center;gap:10px;}
+.sidebar-logo .mark{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--blue),#12335c);display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+.sidebar-logo b{font-size:17px;font-weight:800;letter-spacing:-.01em;}
+.nav-scroll{flex:1;overflow-y:auto;padding-bottom:10px;}
+.nav-section-label{padding:14px 22px 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#3f5468;font-weight:700;}
+.nav-item{
+  display:flex;align-items:center;gap:12px;padding:10px 22px;color:var(--text-secondary);
+  cursor:pointer;border-left:3px solid transparent;font-size:14px;font-weight:500;
+}
+.nav-item:hover{color:var(--text);background:rgba(255,255,255,.02);}
+.nav-item.active{color:var(--text);background:rgba(52,120,246,.1);border-left-color:var(--blue);font-weight:600;}
+.sidebar-footer{border-top:1px solid var(--border);padding:16px 22px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));}
+.sidebar-user{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.sidebar-user .meta{min-width:0;}
+.sidebar-user .name{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sidebar-user .org{font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.plan-chip{font-size:11px;color:var(--blue-light);background:rgba(52,120,246,.12);padding:2px 8px;border-radius:6px;display:inline-block;margin-bottom:10px;}
+
+.main{margin-left:256px;flex:1;display:flex;flex-direction:column;min-height:100vh;min-width:0;}
+.topbar{
+  height:64px;min-height:64px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;
+  padding:0 24px;position:sticky;top:0;background:rgba(5,7,10,.86);backdrop-filter:blur(8px);z-index:20;
+  padding-top:env(safe-area-inset-top,0px);height:calc(64px + env(safe-area-inset-top,0px));
+}
+.search-box{flex:1;max-width:360px;display:flex;align-items:center;gap:8px;background:#08131c;border:1px solid var(--border);border-radius:8px;padding:8px 12px;}
+.search-box input{background:transparent;border:none;outline:none;color:var(--text);font-size:13.5px;width:100%;}
+.period-select{background:#08131c;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;}
+.icon-btn{width:36px;height:36px;border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;background:transparent;cursor:pointer;color:var(--text-secondary);position:relative;flex:0 0 auto;}
+.icon-btn:hover{color:var(--text);border-color:#2a4457;}
+.dot-notif{position:absolute;top:6px;right:7px;width:7px;height:7px;border-radius:50%;background:var(--warn);}
+.hamburger{display:none;}
+.content{padding:26px 28px 60px;flex:1;max-width:1400px;width:100%;}
+.page-title{font-size:22px;font-weight:800;margin:0 0 4px;}
+.page-sub{color:var(--text-secondary);font-size:13.5px;margin:0 0 22px;}
+
+@media (max-width:960px){
+  .sidebar{transform:translateX(-100%);}
+  .sidebar.open{transform:translateX(0);}
+  .main{margin-left:0;}
+  .hamburger{display:flex;}
+  .search-box{display:none;}
+  .content{padding:18px 16px 50px;}
+  .sidebar-scrim{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:45;}
+  .sidebar-scrim.show{display:block;}
+}
+
+/* ---------- login ---------- */
+.login-shell{min-height:100vh;display:flex;}
+.login-form-side{flex:1;display:flex;align-items:center;justify-content:center;padding:32px;}
+.login-brand-side{flex:1;background:linear-gradient(160deg,#081726 0%,#050b12 60%);border-left:1px solid var(--border);display:flex;align-items:center;justify-content:center;padding:60px;position:relative;overflow:hidden;}
+.login-brand-side::before{content:"";position:absolute;width:600px;height:600px;background:radial-gradient(circle,rgba(52,120,246,.16),transparent 65%);top:-150px;right:-150px;}
+.login-box{width:100%;max-width:380px;}
+.demo-box{background:rgba(52,120,246,.08);border:1px dashed rgba(52,120,246,.4);border-radius:8px;padding:12px 14px;font-size:12.5px;color:var(--blue-light);margin-top:18px;cursor:pointer;}
+@media (max-width:860px){.login-brand-side{display:none;}}
+
+/* ---------- onboarding ---------- */
+.onb-shell{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 20px 80px;}
+.onb-progress{width:100%;max-width:640px;display:flex;gap:8px;margin-bottom:36px;}
+.onb-progress .seg{flex:1;height:4px;border-radius:4px;background:var(--border);}
+.onb-progress .seg.done{background:var(--blue);}
+.onb-card{width:100%;max-width:640px;}
+.step-badge{font-size:12px;color:var(--blue-light);font-weight:700;margin-bottom:6px;}
+
+/* ---------- diagnosis ---------- */
+.diag-header{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;}
+.evidence-item{border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;background:rgba(255,255,255,.012);}
+.evidence-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);margin-top:8px;}
+.tone-tabs{display:flex;gap:6px;margin-bottom:12px;}
+.message-box{background:#08131c;border:1px solid var(--border);border-radius:10px;padding:16px;font-size:14px;line-height:1.55;}
+.stepper-progress{display:flex;flex-direction:column;gap:14px;max-width:440px;margin:0 auto;}
+.stepper-item{display:flex;align-items:center;gap:12px;font-size:14px;color:var(--text-secondary);}
+.stepper-item .dot{width:20px;height:20px;border-radius:50%;border:2px solid var(--border);flex:0 0 auto;display:flex;align-items:center;justify-content:center;}
+.stepper-item.active{color:var(--text);}
+.stepper-item.active .dot{border-color:var(--blue);}
+.stepper-item.done .dot{background:var(--blue);border-color:var(--blue);}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;}
+.kpi-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;}
+.kpi-val{font-size:24px;font-weight:800;font-family:'Manrope';margin-top:4px;}
+.kpi-label{font-size:12.5px;color:var(--text-secondary);}
+.kpi-trend{font-size:11.5px;margin-top:6px;color:var(--blue-light);}
+.boot-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;}
+.boot-spinner{width:34px;height:34px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--blue);animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.auth-error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);color:#ff9a9a;font-size:12.5px;padding:10px 12px;border-radius:8px;margin-bottom:14px;}
+</style>
+</head>
+<body>
+<div id="app"><div class="boot-screen"><div class="boot-spinner"></div><span class="muted" style="font-size:13.5px;">Carregando LeadScope…</span></div></div>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+/* ================= CONFIG SUPABASE ================= */
+const SUPABASE_URL = "https://nlzlbrfwaloyxksaevne.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5semxicmZ3YWxveXhrc2Fldm5lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNDA2ODYsImV4cCI6MjEwNTkxNjY4Nn0.7F7Unr0P7htudpx6NX7vdFz3ADLOcMganuDNjotDXIM";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ================= DATA MODEL ================= */
+const CITY = "Sorocaba, SP";
+const NOMES = ['Clínica Sorriso Sorocaba','OdontoVida Sorocaba','Dental Excellence','Clínica Bem Estar Odonto','Sorocaba Odonto Center','Espaço Dental Premium','OdontoMais','Clínica Dr. Ricardo Fontes','Sorriso Perfeito Odontologia','Vitalle Odonto','Clínica Odontológica Santa Fé','OdontoPrime','Dental Care Sorocaba','Clínica Odonto União','Espaço Sorriso Odontologia','OdontoLife','Clínica Dental Nova Aliança','Sorriso & Saúde Odontologia','OdontoBem','Clínica Odontológica Nova Era'];
+const BAIRROS = ['Campolim','Jardim Vergueiro','Éden','Vila Hortência','Centro','Jardim Simus','Vila Barão','Jardim Santa Rosália','Zona Norte','Parque Campolim','Jardim Maria Eugênia','Vila Fiori','Jardim América','Alto da Boa Vista','Jardim Faculdade','Vila Haro','Jardim Pagliato','Vila Trujillo','Jardim Represa','Vossoroca'];
+const RUAS = ['das Flores','Barão de Suruí','Fernando Prestes','Fabrício Vampré','Doutor Salles','Padre Antônio Vieira','Riachuelo','Ipanema','Coronel Aureliano','Doutor Aureliano Barbosa'];
+const SCORES = [92,88,85,81,78,74,71,68,65,61,58,55,52,48,45,38,34,29,22,15];
+const STATUSES = ['Nova','Nova','Em análise','Priorizada','Nova','Abordagem preparada','Contatada','Nova','Respondeu','Priorizada','Em análise','Nova','Reunião agendada','Nova','Contatada','Descartada','Nova','Cliente','Nova','Em análise'];
+
+const SIGNAL_POOL = [
+  {key:'agendamento', texto:'Site não possui sistema de agendamento online visível', fonte:'Site institucional', interpretacao:'Pode indicar dificuldade na jornada de agendamento e possível perda de contatos interessados', servico:0},
+  {key:'formulario', texto:'Formulário de contato apresentou erro ao ser testado', fonte:'Site institucional', interpretacao:'Pode indicar perda de leads que tentam iniciar contato pelo site', servico:1},
+  {key:'perfilIncompleto', texto:'Perfil comercial possui informações incompletas (horário ou categoria)', fonte:'Perfil comercial', interpretacao:'Pode indicar presença digital sem manutenção recorrente', servico:4},
+  {key:'avaliacaoDemora', texto:'Foram encontradas avaliações recentes mencionando demora no atendimento', fonte:'Avaliações públicas', interpretacao:'Pode indicar oportunidade de revisão no processo de atendimento ao cliente', servico:2},
+  {key:'semResposta', texto:'Empresa não responde às avaliações recebidas', fonte:'Avaliações públicas', interpretacao:'Pode indicar reputação digital pouco aproveitada', servico:2},
+  {key:'mobileRuim', texto:'Site apresenta baixa qualidade de navegação em dispositivos móveis', fonte:'Site institucional', interpretacao:'Pode indicar oportunidade de melhorar a experiência em dispositivos móveis', servico:3},
+  {key:'semWhats', texto:'Canal de WhatsApp não está visível no site', fonte:'Site institucional', interpretacao:'Pode indicar dificuldade adicional na jornada de contato', servico:0},
+  {key:'semPublicacao', texto:'Última publicação em redes sociais ocorreu há vários meses', fonte:'Redes sociais', interpretacao:'Pode indicar presença digital sem manutenção recorrente', servico:4},
+];
+const SERVICOS = [
+  'Implementação de agendamento online integrado ao WhatsApp',
+  'Revisão da jornada de agendamento e página de conversão',
+  'Gestão de reputação e resposta a avaliações',
+  'Redesign do site com foco em dispositivos móveis',
+  'Plano de conteúdo e presença em redes sociais',
+];
+
+function numSignalsFor(score){ if(score>=80) return 2; if(score>=60) return 3; if(score>=40) return 4; return 5; }
+function classificacao(score){ if(score>=80) return {label:'Alto potencial', color:'var(--blue)'}; if(score>=60) return {label:'Potencial relevante', color:'var(--blue-light)'}; if(score>=40) return {label:'Acompanhar', color:'var(--warn)'}; return {label:'Baixa prioridade', color:'var(--text-secondary)'}; }
+function potencialBand(score){ return score>=70?'alto':score>=40?'medio':'baixo'; }
+function fmtDate(d){ return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+function daysAgo(n){ const d=new Date(); d.setDate(d.getDate()-n); return d; }
+function slug(s){ return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'').slice(0,16); }
+
+// Reconstrói os sinais completos (texto, fonte, interpretação, serviço) a partir
+// das chaves salvas no banco (empresas.sinais_keys), evitando duplicar esses textos no schema SQL.
+function sinaisFromKeys(keys){ return (keys||[]).map(k=>SIGNAL_POOL.find(s=>s.key===k)).filter(Boolean); }
+
+// Converte uma linha da tabela `empresas` (+ suas `evidencias`) no formato que as telas usam.
+function rowToCompany(row, evidenciaRows){
+  const sinais = sinaisFromKeys(row.sinais_keys);
+  const evidencias = (evidenciaRows||[]).map(e=>({
+    texto:e.texto, fonte:e.fonte,
+    data: e.data ? fmtDate(new Date(e.data+'T00:00:00')) : '',
+    confianca:e.confianca,
+  }));
+  return {
+    id:row.id, nome:row.nome, segmento:row.segmento, cidade:row.cidade, bairro:row.bairro, endereco:row.endereco,
+    telefone:row.telefone, site:row.site, redes:row.redes||[], nota:row.nota, avaliacoes:row.avaliacoes,
+    score:row.score, confianca:row.confianca, potencial:row.potencial,
+    sinais, evidencias,
+    interpretacoes:[...new Set(sinais.map(s=>s.interpretacao))].slice(0,3),
+    servicoRecomendado: row.servico_recomendado,
+    status: row.status,
+    ultimaAtualizacao: row.ultima_atualizacao ? fmtDate(new Date(row.ultima_atualizacao+'T00:00:00')) : '',
+    resultado: row.resultado,
+    monitorada: !!row.monitorada,
+    mensagemGerada: row.mensagem_gerada, mensagemTom: row.mensagem_tom || 'consultivo', mensagemUtilizada: !!row.mensagem_utilizada,
+    perfil:{
+      categoria:'Clínica odontológica', horarios:'Seg a sex, 8h às 19h',
+      respondeuAvaliacoes: !sinais.some(s=>s.key==='semResposta'),
+      completude: sinais.some(s=>s.key==='perfilIncompleto') ? 62 : 94,
+    },
+    siteInfo:{
+      https:true, responsivo: !sinais.some(s=>s.key==='mobileRuim'),
+      agendamento: !sinais.some(s=>s.key==='agendamento'),
+      whatsappVisivel: !sinais.some(s=>s.key==='semWhats'),
+      formularioOk: !sinais.some(s=>s.key==='formulario'),
+      seoBasico: row.score>=55,
+    },
+    avaliacoesInfo:{
+      sentimento: sinais.some(s=>s.key==='avaliacaoDemora') ? 'Misto' : 'Predominantemente positivo',
+      temas: sinais.some(s=>s.key==='avaliacaoDemora') ? ['Tempo de espera','Atendimento','Preço'] : ['Atendimento','Qualidade','Ambiente'],
+    },
+    jornada:{
+      etapas: sinais.some(s=>s.key==='agendamento') ? 4 : 2,
+      whatsapp: !sinais.some(s=>s.key==='semWhats'),
+      formulario: !sinais.some(s=>s.key==='formulario'),
+      agendamentoOnline: !sinais.some(s=>s.key==='agendamento'),
+    },
+    presenca:{
+      redesEncontradas: sinais.some(s=>s.key==='semPublicacao') ? ['Facebook'] : ['Instagram','Facebook'],
+      frequencia: sinais.some(s=>s.key==='semPublicacao') ? 'Baixa (sem publicações recentes)' : 'Regular',
+    },
+  };
+}
+
+// Mapeamento entre os nomes usados nas telas (camelCase) e as colunas do Supabase (snake_case)
+function rowToOnboarding(row){
+  if(!row) return null;
+  return {
+    empresa:row.empresa||'', site:row.site||'', segmento:row.segmento||'', cidade:row.cidade||'',
+    servico:row.servico||'', ticket:row.ticket||'', descricao:row.descricao||'', problema:row.problema||'',
+    segmentosDesejados:row.segmentos_desejados||'', regiao:row.regiao||'', porte:row.porte||'Pequeno e médio porte',
+    palavrasChave:row.palavras_chave||'', qtdOportunidades:row.qtd_oportunidades||'20',
+    pesos: row.pesos || { google:70, site:80, reputacao:60, contato:70, presenca:50, compatibilidade:75, urgencia:65 },
+  };
+}
+function onboardingToRow(ob){
+  return {
+    empresa:ob.empresa, site:ob.site, segmento:ob.segmento, cidade:ob.cidade,
+    servico:ob.servico, ticket:ob.ticket, descricao:ob.descricao, problema:ob.problema,
+    segmentos_desejados:ob.segmentosDesejados, regiao:ob.regiao, porte:ob.porte,
+    palavras_chave:ob.palavrasChave, qtd_oportunidades:ob.qtdOportunidades, pesos:ob.pesos,
+  };
+}
+
+function msgTemplates(c){
+  const primeiro = c.sinais[0];
+  return {
+    direto: `Olá! Analisei a presença digital da ${c.nome} e identifiquei um ponto específico que pode estar reduzindo novos contatos: ${primeiro.texto.toLowerCase()}. Posso te enviar um diagnóstico rápido com o que encontrei?`,
+    consultivo: `Olá. Ao analisar a presença digital da ${c.nome}, encontrei alguns pontos na jornada de contato que podem estar dificultando novos agendamentos, especialmente ${c.sinais.some(s=>s.key==='mobileRuim')?'pelo celular':'no site'}. Posso compartilhar um diagnóstico rápido com as oportunidades que identifiquei?`,
+    informal: `Oi! Passei pelo site e pelo perfil da ${c.nome} e reparei em um detalhe que talvez esteja passando despercebido por aí: ${primeiro.texto.toLowerCase()}. Se fizer sentido, te mando uma análise rapidinha sem compromisso :)`,
+  };
+}
+
+/* ================= STATE ================= */
+// Dados de negócio (empresas, onboarding, perfil) vêm sempre do Supabase — nunca do localStorage.
+// Só preferências puramente visuais (aba aberta, filtro selecionado, menu mobile) ficam salvas
+// localmente, por conveniência, e nunca substituem o que está no banco.
+const DEFAULT_UI_PREFS = {
+  route:'#/overview', sidebarOpen:false,
+  diagTone:'consultivo', detailTab:'perfil', configTab:'perfil',
+  oppFilters:{potencial:'todos', status:'todos', view:'tabela'},
+};
+function loadUiPrefs(){
+  try{
+    const raw = localStorage.getItem('leadscope_ui_prefs_v1');
+    if(raw) return Object.assign({}, DEFAULT_UI_PREFS, JSON.parse(raw));
+  }catch(e){}
+  return JSON.parse(JSON.stringify(DEFAULT_UI_PREFS));
+}
+function saveUiPrefs(){
+  try{
+    localStorage.setItem('leadscope_ui_prefs_v1', JSON.stringify({
+      route: state.route, sidebarOpen: state.sidebarOpen, diagTone: state.diagTone,
+      detailTab: state.detailTab, configTab: state.configTab, oppFilters: state.oppFilters,
+    }));
+  }catch(e){}
+}
+
+let state = Object.assign({
+  booting:true, authChecked:false, authError:null, authMode:'signin', authLoading:false,
+  loggedIn:false, onboarded:false, onboardStep:1, userId:null,
+  onboarding:{ empresa:'', site:'', segmento:'', cidade:'', servico:'', ticket:'', descricao:'', problema:'',
+    segmentosDesejados:'', regiao:'', porte:'Pequeno e médio porte', palavrasChave:'', qtdOportunidades:'20',
+    pesos:{ google:70, site:80, reputacao:60, contato:70, presenca:50, compatibilidade:75, urgencia:65 } },
+  user:{ nome:'', empresa:'', plano:'Plano Piloto', email:'', cargo:'Head Comercial' },
+  companies: [],
+  radars: [],
+  selectedOpps:[],
+}, loadUiPrefs());
+
+function setState(patch){ Object.assign(state, patch); saveUiPrefs(); render(); }
+function setPathLocal(root, path, val){
+  const parts = path.split('.');
+  let obj = root;
+  for(let i=0;i<parts.length-1;i++){ obj = obj[parts[i]]; }
+  obj[parts[parts.length-1]] = val;
+}
+const setPath = setPathLocal;
+
+/* ================= SUPABASE: CARREGAR / GRAVAR DADOS ================= */
+async function loadAllData(userId){
+  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}] = await Promise.all([
+    sb.from('profiles').select('*').eq('id', userId).maybeSingle(),
+    sb.from('account_settings').select('*').eq('user_id', userId).maybeSingle(),
+    sb.from('radares').select('*').eq('user_id', userId).order('criado_em', {ascending:false}),
+    sb.from('empresas').select('*').eq('user_id', userId).order('score', {ascending:false}),
+    sb.from('evidencias').select('*').order('data', {ascending:false}),
+  ]);
+  const evByEmpresa = {};
+  (evidenciasRows||[]).forEach(e=>{ (evByEmpresa[e.empresa_id] = evByEmpresa[e.empresa_id]||[]).push(e); });
+  const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id]));
+  const ob = rowToOnboarding(settings) || state.onboarding;
+  setState({
+    userId,
+    user: { nome: (profile&&profile.nome) || state.user.nome, empresa: ob.empresa || state.user.empresa,
+      plano: (profile&&profile.plano) || 'Plano Piloto', email: (profile&&profile.email) || '',
+      cargo: (profile&&profile.cargo) || 'Head Comercial' },
+    onboarding: ob,
+    onboarded: !!(settings && settings.onboarded),
+    companies,
+    radars: (radaresRows||[]).map(r=>({id:r.id, nome:r.nome, segmento:r.segmento, cidade:r.cidade, criadoEm: r.criado_em ? fmtDate(new Date(r.criado_em+'T00:00:00')) : ''})),
+    loggedIn:true, booting:false,
+  });
+}
+
+async function persistOnboarding(){
+  if(!state.userId) return;
+  await sb.from('account_settings').update(Object.assign(onboardingToRow(state.onboarding), {onboarded:true, updated_at:new Date().toISOString()})).eq('user_id', state.userId);
+}
+async function persistSettingsPartial(){
+  if(!state.userId) return;
+  await sb.from('account_settings').update(onboardingToRow(state.onboarding)).eq('user_id', state.userId);
+}
+async function persistCompanyField(id, fields){
+  await sb.from('empresas').update(fields).eq('id', id);
+}
+
+/* ================= AUTENTICAÇÃO (Supabase Auth) ================= */
+async function bootAuth(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(session && session.user){
+    await loadAllData(session.user.id);
+  } else {
+    setState({ booting:false, authChecked:true, loggedIn:false });
+  }
+}
+sb.auth.onAuthStateChange((event, session)=>{
+  if(event === 'SIGNED_OUT'){
+    setState({ loggedIn:false, onboarded:false, companies:[], radars:[], userId:null, booting:false });
+  } else if(event === 'SIGNED_IN' && session && session.user && state.userId !== session.user.id){
+    loadAllData(session.user.id);
+  }
+});
+
+
+function toast(msg){
+  const wrap = document.getElementById('toastWrap');
+  if(!wrap) return;
+  const el = document.createElement('div');
+  el.className='toast';
+  el.innerHTML = `<span class="toast-check">${icon('check')}</span><span style="flex:1;line-height:1.4;">${esc(msg)}</span><span class="toast-bar"></span>`;
+  wrap.appendChild(el);
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateY(-6px)'; el.style.transition='opacity .25s, transform .25s'; setTimeout(()=>el.remove(),260); }, 3200);
+}
+function flashButton(btn, text){
+  if(!btn) return;
+  if(btn._flashTimer) clearTimeout(btn._flashTimer);
+  if(!btn.dataset.originalHtml) btn.dataset.originalHtml = btn.innerHTML;
+  const original = btn.dataset.originalHtml;
+  btn.disabled = true;
+  btn.classList.add('btn-flash');
+  btn.innerHTML = icon('check') + ' ' + text;
+  btn._flashTimer = setTimeout(()=>{
+    btn.innerHTML = original;
+    btn.disabled = false;
+    btn.classList.remove('btn-flash');
+    delete btn.dataset.originalHtml;
+  }, 1500);
+}
+
+/* ================= ICONS (inline SVG, minimal) ================= */
+function icon(name, cls){
+  const p = {
+    grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    radar:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><path d="M12 12 L18 7"/>',
+    target:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/>',
+    stetho:'<path d="M6 3v6a4 4 0 0 0 8 0V3"/><path d="M18 11v2a6 6 0 0 1-12 0v-2"/><circle cx="18" cy="8" r="2"/>',
+    building:'<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 8h1M14 8h1M9 12h1M14 12h1M9 16h1M14 16h1"/>',
+    doc:'<path d="M7 3h7l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v4h4"/>',
+    trophy:'<path d="M8 4h8v4a4 4 0 0 1-8 0V4Z"/><path d="M8 5H5a3 3 0 0 0 3 5"/><path d="M16 5h3a3 3 0 0 1-3 5"/><path d="M12 12v3M9 20h6M9.5 17h5l.5 3H9l.5-3Z"/>',
+    gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1Z"/>',
+    search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+    bell:'<path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z"/><path d="M10 21a2 2 0 0 0 4 0"/>',
+    plus:'<path d="M12 5v14M5 12h14"/>',
+    menu:'<path d="M3 6h18M3 12h18M3 18h18"/>',
+    logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
+    check:'<path d="M20 6 9 17l-5-5"/>',
+    x:'<path d="M18 6 6 18M6 6l12 12"/>',
+    arrow:'<path d="M5 12h14M13 6l6 6-6 6"/>',
+    globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    phone:'<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1C10.5 20 4 13.5 4 5a1 1 0 0 1 1-1Z"/>',
+    star:'<path d="M12 2.5l2.9 6 6.6.6-5 4.4 1.5 6.5L12 16.7 6 20l1.5-6.5-5-4.4 6.6-.6L12 2.5Z"/>',
+    alert:'<path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/>',
+    copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+    edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+    eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+    filter:'<path d="M4 5h16M7 12h10M10 19h4"/>',
+    down:'<path d="M6 9l6 6 6-6"/>',
+    dl:'<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/>',
+    users:'<circle cx="9" cy="8" r="3"/><path d="M2 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/><circle cx="17" cy="9" r="2.5"/><path d="M22 20c0-2.6-2-4.7-4.5-5.4"/>',
+    lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    zap:'<path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/>',
+  }[name] || '';
+  return `<svg class="icon ${cls||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+}
+
+/* ================= SVG CHART HELPERS ================= */
+function barChartSVG(data, opts){
+  opts = opts||{}; const w=opts.w||560,h=opts.h||200,pad=32;
+  const max = Math.max(...data.map(d=>d.v))*1.15 || 1;
+  const bw = (w-pad*1.5)/data.length;
+  let bars='', labels='';
+  data.forEach((d,i)=>{
+    const bh = (d.v/max)*(h-46);
+    const x = pad + i*bw + bw*0.18;
+    const y = h-30-bh;
+    bars += `<rect x="${x}" y="${y}" width="${bw*0.64}" height="${bh}" rx="4" fill="${d.color||'var(--blue)'}"/>
+      <text x="${x+bw*0.32}" y="${y-6}" font-size="10.5" fill="#87919C" text-anchor="middle" font-family="Inter">${d.v}</text>`;
+    labels += `<text x="${x+bw*0.32}" y="${h-10}" font-size="10.5" fill="#87919C" text-anchor="middle" font-family="Inter">${d.label}</text>`;
+  });
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block">
+    <line x1="${pad}" y1="${h-30}" x2="${w-8}" y2="${h-30}" stroke="#1D3344"/>
+    ${bars}${labels}
+  </svg>`;
+}
+function lineChartSVG(data, opts){
+  opts=opts||{}; const w=opts.w||560,h=opts.h||200,pad=30;
+  const max = Math.max(...data.map(d=>d.v))*1.2||1, min=0;
+  const stepX = (w-pad*1.4)/(data.length-1);
+  const pts = data.map((d,i)=>{
+    const x = pad+i*stepX;
+    const y = h-30-((d.v-min)/(max-min))*(h-46);
+    return [x,y];
+  });
+  const path = pts.map((p,i)=> (i===0?'M':'L')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  const area = path + ` L${pts[pts.length-1][0]},${h-30} L${pts[0][0]},${h-30} Z`;
+  let dots='', labels='';
+  pts.forEach((p,i)=>{
+    dots += `<circle cx="${p[0]}" cy="${p[1]}" r="3.4" fill="#3478F6"/>`;
+    labels += `<text x="${p[0]}" y="${h-10}" font-size="10.5" fill="#87919C" text-anchor="middle" font-family="Inter">${data[i].label}</text>`;
+  });
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block">
+    <defs><linearGradient id="lg1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3478F6" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#3478F6" stop-opacity="0"/>
+    </linearGradient></defs>
+    <line x1="${pad}" y1="${h-30}" x2="${w-8}" y2="${h-30}" stroke="#1D3344"/>
+    <path d="${area}" fill="url(#lg1)" stroke="none"/>
+    <path d="${path}" fill="none" stroke="#3478F6" stroke-width="2.4"/>
+    ${dots}${labels}
+  </svg>`;
+}
+function donutSVG(score, size){
+  size = size||132; const r=size/2-10, c=2*Math.PI*r, cx=size/2, cy=size/2;
+  const cls = classificacao(score);
+  const off = c*(1-score/100);
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+    <circle cx="${cx}" cy="${cy}" r="${r}" stroke="#1D3344" stroke-width="11" fill="none"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" stroke="${cls.color}" stroke-width="11" fill="none"
+      stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${off}"
+      transform="rotate(-90 ${cx} ${cy})"/>
+    <text x="${cx}" y="${cy-2}" text-anchor="middle" font-size="${size*0.26}" fill="#F5F7FA" class="donut-label" font-family="Manrope">${score}</text>
+    <text x="${cx}" y="${cy+18}" text-anchor="middle" font-size="10.5" fill="#87919C" font-family="Inter">/ 100</text>
+  </svg>`;
+}
+function funnelSVG(stages){
+  const w=760,h=stages.length*46+10; const max=stages[0].v;
+  let out='';
+  stages.forEach((s,i)=>{
+    const pct = s.v/max;
+    const barW = 200 + pct*(w-260);
+    const y = i*46+8;
+    out += `<rect x="0" y="${y}" width="${barW}" height="30" rx="6" fill="${i===0?'#3478F6':'rgba(102,163,255,'+(0.85-i*0.1)+')'}"/>
+      <text x="14" y="${y+20}" font-size="12.5" fill="#04121e" font-weight="700" font-family="Inter">${s.label}</text>
+      <text x="${barW+12}" y="${y+20}" font-size="12.5" fill="#F5F7FA" font-family="Inter">${s.v}</text>`;
+  });
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block">${out}</svg>`;
+}
+
+/* ================= ROUTER / RENDER ================= */
+function navigate(hash){ location.hash = hash; }
+window.addEventListener('hashchange', ()=>{ setState({route: location.hash || '#/overview'}); });
+
+const NAV_ITEMS = [
+  {href:'#/overview', label:'Visão geral', icon:'grid'},
+  {href:'#/radar', label:'Radar', icon:'radar'},
+  {href:'#/oportunidades', label:'Oportunidades', icon:'target'},
+  {href:'#/diagnostico', label:'Diagnósticos', icon:'stetho'},
+  {href:'#/monitoradas', label:'Empresas monitoradas', icon:'building'},
+  {href:'#/relatorios', label:'Relatórios', icon:'doc'},
+  {href:'#/resultados', label:'Resultados', icon:'trophy'},
+  {href:'#/configuracoes', label:'Configurações', icon:'gear'},
+];
+
+function render(){
+  const app = document.getElementById('app');
+  if(state.booting){ app.innerHTML = `<div class="boot-screen"><div class="boot-spinner"></div><span class="muted" style="font-size:13.5px;">Carregando LeadScope…</span></div>`; return; }
+  if(!state.loggedIn){ app.innerHTML = renderLogin(); bindLogin(); return; }
+  if(!state.onboarded){ app.innerHTML = renderOnboarding(); bindOnboarding(); return; }
+
+  const routeParts = (state.route||'#/overview').split('/');
+  const route = routeParts[1] || 'overview';
+  const routeId = routeParts[2] || null;
+  let body = '';
+  if(route==='overview') body = renderOverview();
+  else if(route==='radar') body = renderRadar();
+  else if(route==='oportunidades') body = renderOportunidades();
+  else if(route==='diagnostico' || route==='empresa'){
+    body = routeId ? renderDiagnostico() : renderDiagnosticoList();
+  }
+  else if(route==='monitoradas') body = renderMonitoradas();
+  else if(route==='relatorios') body = renderRelatorios();
+  else if(route==='resultados') body = renderResultados();
+  else if(route==='configuracoes') body = renderConfiguracoes();
+  else body = renderOverview();
+
+  app.innerHTML = `
+  <div class="app-shell">
+    <div class="sidebar-scrim ${state.sidebarOpen?'show':''}" id="scrim"></div>
+    <aside class="sidebar ${state.sidebarOpen?'open':''}" id="sidebar">
+      <div class="sidebar-logo"><div class="mark">${icon('zap','')}</div><b>LeadScope</b></div>
+      <div class="nav-scroll">
+        <div class="nav-section-label">Plataforma</div>
+        ${NAV_ITEMS.map(n=>`
+          <div class="nav-item ${activeRoute(n.href)?'active':''}" data-nav="${n.href}">
+            ${icon(n.icon)}<span>${n.label}</span>
+          </div>`).join('')}
+      </div>
+      <div class="sidebar-footer">
+        <div class="plan-chip">${state.user.plano}</div>
+        <div class="sidebar-user">
+          <div class="avatar">${initials(state.user.nome)}</div>
+          <div class="meta">
+            <div class="name">${state.user.nome}</div>
+            <div class="org">${state.user.empresa}</div>
+          </div>
+        </div>
+        <button class="btn btn-block btn-sm" id="logoutBtn">${icon('logout')} Sair</button>
+      </div>
+    </aside>
+    <div class="main">
+      <div class="topbar">
+        <button class="icon-btn hamburger" id="hamburger">${icon('menu')}</button>
+        <div class="search-box">${icon('search')}<input placeholder="Buscar empresa, radar ou relatório..." id="topSearch"></div>
+        <select class="period-select" id="periodSelect">
+          <option>Últimos 7 dias</option>
+          <option selected>Últimos 30 dias</option>
+          <option>Últimos 90 dias</option>
+        </select>
+        <div style="flex:1"></div>
+        <button class="btn btn-primary btn-sm" data-nav="#/radar">${icon('plus')} Nova busca</button>
+        <button class="icon-btn tooltip">${icon('bell')}<span class="dot-notif"></span><span class="tooltip-bubble">3 novas atualizações</span></button>
+        <div class="avatar tooltip">${initials(state.user.nome)}<span class="tooltip-bubble">${state.user.nome}</span></div>
+      </div>
+      <div class="content">${body}</div>
+    </div>
+  </div>`;
+  bindShell();
+  bindPageEvents(route);
+}
+function initials(name){ return name.split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase(); }
+function activeRoute(href){
+  const cur = (state.route||'').split('/')[1];
+  const target = href.split('/')[1];
+  if(target==='diagnostico') return cur==='diagnostico'||cur==='diag'||cur==='empresa';
+  return cur===target;
+}
+function bindShell(){
+  document.querySelectorAll('[data-nav]').forEach(el=>{
+    el.addEventListener('click', ()=>{ setState({sidebarOpen:false}); navigate(el.getAttribute('data-nav')); });
+  });
+  const h = document.getElementById('hamburger');
+  if(h) h.addEventListener('click', ()=> setState({sidebarOpen:!state.sidebarOpen}));
+  const scrim = document.getElementById('scrim');
+  if(scrim) scrim.addEventListener('click', ()=> setState({sidebarOpen:false}));
+  const lb = document.getElementById('logoutBtn');
+  if(lb) lb.addEventListener('click', async ()=>{
+    await sb.auth.signOut();
+    setState({loggedIn:false, onboarded:false, companies:[], radars:[], userId:null});
+    toast('Sessão encerrada.');
+  });
+}
+
+/* ================= LOGIN ================= */
+function renderLogin(){
+  const isSignup = state.authMode==='signup';
+  return `
+  <div class="login-shell">
+    <div class="login-form-side">
+      <div class="login-box">
+        <div class="sidebar-logo" style="padding:0 0 28px;"><div class="mark">${icon('zap')}</div><b style="font-size:20px;">LeadScope</b></div>
+        <h1 style="font-size:24px;margin:0 0 6px;">${isSignup ? 'Criar sua conta' : 'Entrar na plataforma'}</h1>
+        <p class="muted" style="margin:0 0 20px;font-size:13.5px;">${isSignup ? 'Sua conta já nasce com um radar e 20 oportunidades de demonstração.' : 'Acesse sua conta para ver as oportunidades priorizadas de hoje.'}</p>
+        ${state.authError ? `<div class="auth-error">${esc(state.authError)}</div>` : ''}
+        ${isSignup ? `<div class="field"><label class="label">Seu nome</label><input class="input" id="loginNome" placeholder="Como podemos te chamar"></div>` : ''}
+        <div class="field"><label class="label">E-mail</label><input class="input" id="loginEmail" type="email" placeholder="voce@empresa.com.br"></div>
+        <div class="field"><label class="label">Senha</label><input class="input" type="password" id="loginPass" placeholder="Mínimo 6 caracteres"></div>
+        <button class="btn btn-primary btn-block" id="loginBtn" ${state.authLoading?'disabled':''}>${state.authLoading ? 'Aguarde...' : (isSignup ? 'Criar conta' : 'Entrar')}</button>
+        <div class="row between" style="margin-top:16px;">
+          <span class="muted" style="font-size:12.5px;">${isSignup ? 'Já tem uma conta?' : 'Ainda não tem conta?'}</span>
+          <span style="font-size:12.5px;color:var(--blue-light);cursor:pointer;" id="toggleAuthMode">${isSignup ? 'Entrar' : 'Criar conta'}</span>
+        </div>
+      </div>
+    </div>
+    <div class="login-brand-side">
+      <div style="max-width:420px;position:relative;">
+        <h2 style="font-size:30px;line-height:1.25;margin:0 0 16px;">Veja a oportunidade.<br>Saiba o que fazer.</h2>
+        <p class="muted" style="font-size:14.5px;line-height:1.6;">Encontre empresas com necessidades comerciais verificáveis e descubra como iniciar uma conversa relevante.</p>
+      </div>
+    </div>
+  </div>`;
+}
+function bindLogin(){
+  document.getElementById('toggleAuthMode').addEventListener('click', ()=>{
+    setState({authMode: state.authMode==='signup' ? 'signin' : 'signup', authError:null});
+  });
+  document.getElementById('loginBtn').addEventListener('click', async ()=>{
+    const email = document.getElementById('loginEmail').value.trim();
+    const pass = document.getElementById('loginPass').value;
+    if(!email || !pass){ setState({authError:'Preencha e-mail e senha.'}); return; }
+    setState({authLoading:true, authError:null});
+    try{
+      if(state.authMode==='signup'){
+        const nome = (document.getElementById('loginNome')||{}).value || '';
+        const { data, error } = await sb.auth.signUp({ email, password: pass, options:{ data:{ nome } } });
+        if(error) throw error;
+        if(data.session){
+          await loadAllData(data.user.id);
+          toast('Conta criada com sucesso. Bem-vindo(a)!');
+        } else {
+          setState({authLoading:false, authError:'Conta criada! Verifique seu e-mail para confirmar o acesso antes de entrar.'});
+        }
+      } else {
+        const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+        if(error) throw error;
+        await loadAllData(data.user.id);
+        toast('Bem-vindo de volta!');
+      }
+    }catch(e){
+      setState({authLoading:false, authError: traduzErroAuth(e.message)});
+    }
+  });
+}
+function traduzErroAuth(msg){
+  if(!msg) return 'Não foi possível autenticar. Tente novamente.';
+  if(/invalid login credentials/i.test(msg)) return 'E-mail ou senha incorretos.';
+  if(/already registered|already exists/i.test(msg)) return 'Já existe uma conta com esse e-mail. Tente entrar.';
+  if(/password.*(6|short)/i.test(msg)) return 'A senha precisa ter pelo menos 6 caracteres.';
+  if(/email not confirmed/i.test(msg)) return 'Confirme seu e-mail antes de entrar (verifique sua caixa de entrada).';
+  return msg;
+}
+
+/* ================= ONBOARDING ================= */
+function renderOnboarding(){
+  const s = state.onboardStep, ob = state.onboarding;
+  const steps = ['Sobre sua empresa','Oferta comercial','Cliente ideal','Critérios de prioridade'];
+  let inner = '';
+  if(s===1){
+    inner = `
+      <div class="field"><label class="label">Nome da empresa</label><input class="input" id="f_empresa" value="${esc(ob.empresa)}" placeholder="Ex: Quantis Growth"></div>
+      <div class="field"><label class="label">Site</label><input class="input" id="f_site" value="${esc(ob.site)}" placeholder="www.suaempresa.com.br"></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;">
+        <div class="field"><label class="label">Segmento</label><input class="input" id="f_segmento" value="${esc(ob.segmento)}" placeholder="Ex: Agência de marketing"></div>
+        <div class="field"><label class="label">Cidade e estado</label><input class="input" id="f_cidade" value="${esc(ob.cidade)}" placeholder="Ex: Sorocaba, SP"></div>
+      </div>`;
+  } else if(s===2){
+    inner = `
+      <div class="field"><label class="label">Serviço principal vendido</label><input class="input" id="f_servico" value="${esc(ob.servico)}" placeholder="Ex: Gestão de reputação digital"></div>
+      <div class="field"><label class="label">Ticket médio</label><input class="input" id="f_ticket" value="${esc(ob.ticket)}" placeholder="Ex: R$ 1.500/mês"></div>
+      <div class="field"><label class="label">Breve descrição da oferta</label><textarea class="input" id="f_descricao" rows="3" placeholder="Como você descreveria sua oferta em poucas palavras?">${esc(ob.descricao)}</textarea></div>
+      <div class="field"><label class="label">Principal problema resolvido</label><input class="input" id="f_problema" value="${esc(ob.problema)}" placeholder="Ex: Falta de agendamentos qualificados"></div>`;
+  } else if(s===3){
+    inner = `
+      <div class="field"><label class="label">Segmentos desejados</label><input class="input" id="f_segdes" value="${esc(ob.segmentosDesejados)}" placeholder="Ex: Clínicas odontológicas, estéticas"></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;">
+        <div class="field"><label class="label">Região</label><input class="input" id="f_regiao" value="${esc(ob.regiao)}" placeholder="Ex: Sorocaba e região"></div>
+        <div class="field"><label class="label">Porte das empresas</label>
+          <select class="input" id="f_porte">
+            ${['Pequeno porte','Pequeno e médio porte','Médio porte','Médio e grande porte'].map(p=>`<option ${ob.porte===p?'selected':''}>${p}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="field"><label class="label">Palavras-chave</label><input class="input" id="f_palavras" value="${esc(ob.palavrasChave)}" placeholder="Ex: odontologia, clínica, dentista"></div>
+      <div class="field"><label class="label">Quantidade desejada de oportunidades</label><input class="input" id="f_qtd" value="${esc(ob.qtdOportunidades)}" placeholder="Ex: 20"></div>`;
+  } else if(s===4){
+    const criterios = [['google','Qualidade do perfil no Google'],['site','Qualidade do site'],['reputacao','Reputação e avaliações'],['contato','Facilidade de contato'],['presenca','Presença digital'],['compatibilidade','Compatibilidade com a oferta'],['urgencia','Sinais de urgência']];
+    inner = criterios.map(([k,label])=>`
+      <div class="field">
+        <div class="row between" style="margin-bottom:6px;"><label class="label" style="margin:0;">${label}</label><span class="muted" style="font-size:12.5px;" id="v_${k}">${ob.pesos[k]}%</span></div>
+        <input type="range" class="slider" min="0" max="100" value="${ob.pesos[k]}" data-peso="${k}">
+      </div>`).join('');
+  }
+  return `
+  <div class="onb-shell">
+    <div class="onb-progress">${[1,2,3,4].map(i=>`<div class="seg ${i<=s?'done':''}"></div>`).join('')}</div>
+    <div class="onb-card card">
+      <div class="step-badge">ETAPA ${s} DE 4</div>
+      <h2 style="margin:0 0 4px;font-size:20px;">${steps[s-1]}</h2>
+      <p class="muted" style="margin:0 0 22px;font-size:13.5px;">${s===4?'Escolha a importância de cada critério para calcular o LeadScope Score.':'Essas informações ajudam a priorizar as oportunidades certas para você.'}</p>
+      ${inner}
+      <div class="divider"></div>
+      <div class="row between">
+        <button class="btn ${s===1?'btn-ghost':''}" id="obBack" ${s===1?'style="visibility:hidden"':''}>${icon('arrow',)} Voltar</button>
+        <button class="btn btn-primary" id="obNext">${s===4?'Criar meu primeiro radar':'Continuar'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+function esc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function bindOnboarding(){
+  const ob = state.onboarding;
+  const ids = {f_empresa:'empresa',f_site:'site',f_segmento:'segmento',f_cidade:'cidade',f_servico:'servico',f_ticket:'ticket',f_descricao:'descricao',f_problema:'problema',f_segdes:'segmentosDesejados',f_regiao:'regiao',f_palavras:'palavrasChave',f_qtd:'qtdOportunidades'};
+  Object.keys(ids).forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('input', ()=>{ ob[ids[id]] = el.value; });
+  });
+  const porte = document.getElementById('f_porte');
+  if(porte) porte.addEventListener('change', ()=>{ ob.porte = porte.value; });
+  document.querySelectorAll('[data-peso]').forEach(sl=>{
+    sl.addEventListener('input', ()=>{
+      const k = sl.getAttribute('data-peso');
+      ob.pesos[k] = +sl.value;
+      document.getElementById('v_'+k).textContent = sl.value+'%';
+    });
+  });
+  const back = document.getElementById('obBack');
+  if(back) back.addEventListener('click', ()=> setState({onboardStep: Math.max(1, state.onboardStep-1)}));
+  document.getElementById('obNext').addEventListener('click', async ()=>{
+    if(state.onboardStep<4){ setState({onboardStep: state.onboardStep+1}); }
+    else {
+      const btn = document.getElementById('obNext');
+      btn.disabled = true; btn.textContent = 'Salvando...';
+      try{
+        await persistOnboarding();
+        setState({onboarded:true, route:'#/overview'});
+        toast('Radar "Clínicas odontológicas — '+CITY+'" criado com sucesso.');
+      }catch(e){
+        btn.disabled=false; btn.textContent='Criar meu primeiro radar';
+        toast('Não foi possível salvar agora. Tente novamente.');
+      }
+    }
+  });
+}
+
+/* ================= OVERVIEW ================= */
+function renderOverview(){
+  const cs = state.companies;
+  const kpis = [
+    {label:'Empresas analisadas', val:cs.length*8+34, trend:'+12% vs período anterior'},
+    {label:'Oportunidades encontradas', val:cs.length, trend:'+5 esta semana'},
+    {label:'Alto potencial', val:cs.filter(c=>c.potencial==='alto').length, trend:'Score ≥ 70'},
+    {label:'Empresas monitoradas', val:cs.filter(c=>c.monitorada).length, trend:'Acompanhamento ativo'},
+    {label:'Abordagens realizadas', val:cs.filter(c=>c.status!=='Nova').length, trend:'Últimos 30 dias'},
+    {label:'Reuniões geradas', val:cs.filter(c=>c.status==='Reunião agendada'||c.status==='Cliente').length, trend:'Últimos 30 dias'},
+  ];
+  const top5 = [...cs].sort((a,b)=>b.score-a.score).slice(0,5);
+  const signalCounts = {};
+  cs.forEach(c=> c.sinais.forEach(s=>{ signalCounts[s.texto] = (signalCounts[s.texto]||0)+1; }));
+  const topSignals = Object.entries(signalCounts).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const funnel = [{label:'Encontradas',v:240},{label:'Analisadas',v:190},{label:'Priorizadas',v:96},{label:'Abordadas',v:58},{label:'Responderam',v:27},{label:'Reuniões',v:14},{label:'Vendas',v:6}];
+  const weekly = [{label:'S1',v:8},{label:'S2',v:12},{label:'S3',v:10},{label:'S4',v:15},{label:'S5',v:18},{label:'S6',v:14},{label:'S7',v:20},{label:'S8',v:23}];
+
+  return `
+  <h1 class="page-title">Visão geral</h1>
+  <p class="page-sub">Resumo executivo das oportunidades de ${state.user.empresa} nos últimos 30 dias.</p>
+  <div class="kpi-grid" style="margin-bottom:22px;">
+    ${kpis.map(k=>`
+      <div class="kpi-card tooltip">
+        <div class="kpi-label">${k.label}</div>
+        <div class="kpi-val">${k.val}</div>
+        <div class="kpi-trend">${k.trend}</div>
+        <span class="tooltip-bubble">Indicador calculado a partir dos radares ativos</span>
+      </div>`).join('')}
+  </div>
+
+  <div class="grid" style="grid-template-columns:1.4fr 1fr;align-items:start;margin-bottom:22px;">
+    <div class="card">
+      <div class="card-title">Oportunidades encontradas por semana</div>
+      <div class="card-sub">Volume de novas oportunidades identificadas pelos radares ativos.</div>
+      ${lineChartSVG(weekly)}
+    </div>
+    <div class="card">
+      <div class="card-title">Funil comercial</div>
+      <div class="card-sub">Da descoberta até a venda, no período selecionado.</div>
+      ${funnelSVG(funnel)}
+    </div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:1.4fr 1fr;align-items:start;">
+    <div class="card">
+      <div class="row between" style="margin-bottom:2px;">
+        <div class="card-title" style="margin:0;">Prioridades de hoje</div>
+        <span class="badge badge-blue">5 recomendadas</span>
+      </div>
+      <p class="card-sub">Empresas com maior potencial comercial, calculado a partir dos seus critérios.</p>
+      ${top5.map(c=>`
+        <div class="row between" style="padding:12px 0;border-top:1px solid var(--border);">
+          <div class="row gap-12" style="min-width:0;">
+            <div class="avatar" style="background:linear-gradient(135deg,${classificacao(c.score).color},#0b1e2e)">${initials(c.nome)}</div>
+            <div style="min-width:0;">
+              <div style="font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;">${c.nome}</div>
+              <div class="muted" style="font-size:12px;">${c.segmento} · ${c.bairro}</div>
+              <div class="muted" style="font-size:12px;margin-top:2px;">${c.interpretacoes[0]}</div>
+            </div>
+          </div>
+          <div class="row gap-12" style="flex:0 0 auto;">
+            <div style="text-align:right;">
+              <div style="font-weight:800;font-family:Manrope;color:${classificacao(c.score).color}">${c.score}</div>
+              <div class="muted" style="font-size:11px;">${c.servicoRecomendado.split(' ').slice(0,3).join(' ')}…</div>
+            </div>
+            <button class="btn btn-sm" data-diag="${c.id}">Ver diagnóstico</button>
+          </div>
+        </div>`).join('')}
+    </div>
+    <div class="card">
+      <div class="card-title">Principais sinais encontrados</div>
+      <p class="card-sub">Sinais públicos mais frequentes entre as empresas analisadas.</p>
+      ${topSignals.map(([txt,count])=>`
+        <div class="row between" style="padding:9px 0;border-top:1px solid var(--border);">
+          <span style="font-size:13px;max-width:78%;">${txt}</span>
+          <span class="badge badge-gray">${count}</span>
+        </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+/* ================= RADAR ================= */
+function renderRadar(){
+  return `
+  <h1 class="page-title">Radar</h1>
+  <p class="page-sub">Configure uma nova busca para encontrar empresas com necessidades comerciais verificáveis.</p>
+  <div class="grid" style="grid-template-columns:1.3fr .9fr;align-items:start;">
+    <div class="card">
+      <div class="card-title">Novo radar</div>
+      <p class="card-sub">Dados demonstrativos — nenhuma coleta automatizada é realizada nesta versão.</p>
+      <div class="field"><label class="label">Nome do radar</label><input class="input" id="rNome" placeholder="Ex: Clínicas odontológicas — Sorocaba" value="Clínicas odontológicas — ${CITY}"></div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;">
+        <div class="field"><label class="label">Segmento</label><input class="input" value="Clínica Odontológica"></div>
+        <div class="field"><label class="label">Serviço que será oferecido</label><input class="input" value="${esc(state.onboarding.servico)||'Gestão de reputação e presença digital'}"></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr;">
+        <div class="field"><label class="label">Cidade</label><input class="input" value="Sorocaba"></div>
+        <div class="field"><label class="label">Estado</label><input class="input" value="SP"></div>
+        <div class="field"><label class="label">Raio / região</label><input class="input" value="15 km"></div>
+      </div>
+      <div class="field"><label class="label">Palavras-chave</label><input class="input" value="odontologia, clínica, dentista"></div>
+      <div class="field"><label class="label">Quantidade de resultados</label><input class="input" value="20"></div>
+      <div class="divider"></div>
+      <div class="card-title" style="font-size:13.5px;">Filtros opcionais</div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;margin-bottom:6px;">
+        <div class="field"><label class="label">Nota mínima</label><input class="input" placeholder="Ex: 3.0"></div>
+        <div class="field"><label class="label">Nota máxima</label><input class="input" placeholder="Ex: 5.0"></div>
+      </div>
+      <div class="field"><label class="label">Quantidade mínima de avaliações</label><input class="input" placeholder="Ex: 10"></div>
+      <div class="pill-group" style="margin-bottom:14px;">
+        ${['Possui site','Possui telefone','Possui WhatsApp','Possui redes sociais','Possui agendamento','Site com problemas','Perfil incompleto','Avaliações recentes negativas'].map((f,i)=>`<span class="pill ${i%3===1?'active':''}">${f}</span>`).join('')}
+      </div>
+      <button class="btn btn-primary btn-block" id="runRadar">${icon('radar')} Analisar oportunidades</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Radares ativos</div>
+      ${state.radars.map(r=>`
+        <div style="padding:12px 0;border-top:1px solid var(--border);">
+          <div style="font-weight:600;font-size:13.5px;">${r.nome}</div>
+          <div class="muted" style="font-size:12px;">${r.segmento} · ${r.cidade}</div>
+          <div class="muted" style="font-size:11.5px;margin-top:4px;">Criado em ${r.criadoEm}</div>
+        </div>`).join('')}
+      <div class="divider"></div>
+      <div class="empty" style="padding:24px 8px;">
+        ${icon('radar','')}
+        <h4>Pronto para uma nova busca?</h4>
+        <p>Configure os critérios ao lado e clique em "Analisar oportunidades".</p>
+      </div>
+    </div>
+  </div>
+  <div id="processingModalWrap"></div>`;
+}
+function bindRadarProcessing(){
+  const btn = document.getElementById('runRadar');
+  if(!btn) return;
+  btn.addEventListener('click', ()=>{
+    const steps = ['Localizando empresas','Verificando presença digital','Analisando site e avaliações','Calculando potencial comercial','Preparando recomendações'];
+    const wrap = document.getElementById('processingModalWrap');
+    let i=0;
+    function paint(){
+      wrap.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(3,6,10,.7);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;">
+        <div class="card" style="width:100%;max-width:420px;">
+          <div class="card-title">Analisando oportunidades</div>
+          <p class="card-sub">Isso pode levar alguns instantes.</p>
+          <div class="stepper-progress">
+            ${steps.map((s,idx)=>`
+              <div class="stepper-item ${idx<i?'done':idx===i?'active':''}">
+                <span class="dot">${idx<i?icon('check'):''}</span> ${s}
+              </div>`).join('')}
+          </div>
+        </div>
+      </div>`;
+    }
+    paint();
+    const t = setInterval(async ()=>{
+      i++;
+      if(i>steps.length){
+        clearInterval(t); wrap.innerHTML='';
+        try{
+          const nomeInput = document.getElementById('rNome');
+          const nome = (nomeInput && nomeInput.value) || ('Radar '+fmtDate(new Date()));
+          if(state.userId){
+            const { data } = await sb.from('radares').insert({ user_id: state.userId, nome, segmento:'Clínica Odontológica', cidade: CITY }).select().maybeSingle();
+            if(data) state.radars.unshift({id:data.id, nome:data.nome, segmento:data.segmento, cidade:data.cidade, criadoEm: fmtDate(new Date())});
+          }
+        }catch(e){}
+        toast('Radar concluído: '+state.companies.length+' oportunidades analisadas.');
+        navigate('#/oportunidades');
+        return;
+      }
+      paint();
+    }, 700);
+  });
+}
+
+/* ================= OPORTUNIDADES ================= */
+function renderOportunidades(){
+  const f = state.oppFilters;
+  let list = state.companies.slice();
+  if(f.potencial!=='todos') list = list.filter(c=>c.potencial===f.potencial);
+  if(f.status!=='todos') list = list.filter(c=>c.status===f.status);
+  list.sort((a,b)=>b.score-a.score);
+  const statusOptions = [...new Set(state.companies.map(c=>c.status))];
+
+  return `
+  <div class="row between wrap" style="margin-bottom:4px;">
+    <div>
+      <h1 class="page-title">Oportunidades</h1>
+      <p class="page-sub">${list.length} empresas · ordenadas por maior potencial comercial</p>
+    </div>
+    <div class="row gap-8">
+      <button class="btn btn-sm ${f.view==='tabela'?'btn-primary':''}" id="viewTabela">Tabela</button>
+      <button class="btn btn-sm ${f.view==='cards'?'btn-primary':''}" id="viewCards">Cards</button>
+      <button class="btn btn-sm" id="exportCsv">${icon('dl')} Exportar CSV</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="row gap-12 wrap">
+      <div>
+        <label class="label">Potencial</label>
+        <select class="input" id="fPotencial" style="min-width:150px;">
+          <option value="todos" ${f.potencial==='todos'?'selected':''}>Todos</option>
+          <option value="alto" ${f.potencial==='alto'?'selected':''}>Alto</option>
+          <option value="medio" ${f.potencial==='medio'?'selected':''}>Médio</option>
+          <option value="baixo" ${f.potencial==='baixo'?'selected':''}>Baixo</option>
+        </select>
+      </div>
+      <div>
+        <label class="label">Status</label>
+        <select class="input" id="fStatus" style="min-width:170px;">
+          <option value="todos" ${f.status==='todos'?'selected':''}>Todos</option>
+          ${statusOptions.map(s=>`<option value="${s}" ${f.status===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div style="flex:1"></div>
+      ${state.selectedOpps.length ? `
+        <div class="row gap-8" style="align-items:flex-end;">
+          <span class="badge badge-blue" style="align-self:center;">${state.selectedOpps.length} selecionadas</span>
+          <button class="btn btn-sm" id="bulkMonitor">Marcar para monitoramento</button>
+          <button class="btn btn-sm" id="bulkStatus">Marcar como Priorizada</button>
+        </div>` : ''}
+    </div>
+  </div>
+
+  ${f.view==='cards' ? renderOppCards(list) : renderOppTable(list)}
+  `;
+}
+function statusColor(status){
+  if(status==='Cliente') return 'badge-blue';
+  if(status==='Descartada') return 'badge-error';
+  if(status==='Reunião agendada'||status==='Respondeu') return 'badge-warn';
+  return 'badge-gray';
+}
+function renderOppTable(list){
+  if(!list.length) return `<div class="card empty">${icon('target')}<h4>Nenhuma oportunidade encontrada</h4><p>Ajuste os filtros ou crie um novo radar para encontrar empresas.</p><button class="btn btn-primary" data-nav="#/radar">Criar radar</button></div>`;
+  return `
+  <div class="card" style="padding:0;">
+    <div class="table-scroll">
+    <table>
+      <thead><tr>
+        <th><input type="checkbox" id="selAll"></th>
+        <th>Empresa</th><th>Segmento</th><th>Localização</th><th>Score</th><th>Potencial</th>
+        <th>Principal sinal</th><th>Serviço recomendado</th><th>Confiança</th><th>Status</th><th>Análise</th><th></th>
+      </tr></thead>
+      <tbody>
+      ${list.map(c=>`
+        <tr class="row-hover">
+          <td><input type="checkbox" class="selOpp" data-id="${c.id}" ${state.selectedOpps.includes(c.id)?'checked':''}></td>
+          <td style="font-weight:600;max-width:180px;">${c.nome}</td>
+          <td class="muted">${c.segmento}</td>
+          <td class="muted">${c.bairro}</td>
+          <td style="font-weight:800;color:${classificacao(c.score).color}">${c.score}</td>
+          <td><span class="badge ${c.potencial==='alto'?'badge-blue':c.potencial==='medio'?'badge-warn':'badge-gray'}">${c.potencial==='alto'?'Alto':c.potencial==='medio'?'Médio':'Baixo'}</span></td>
+          <td class="muted" style="max-width:220px;">${c.sinais[0].texto}</td>
+          <td class="muted" style="max-width:200px;">${c.servicoRecomendado}</td>
+          <td class="muted">${c.confianca}</td>
+          <td><span class="badge ${statusColor(c.status)}">${c.status}</span></td>
+          <td class="muted">${c.ultimaAtualizacao}</td>
+          <td><button class="btn btn-sm" data-diag="${c.id}">Ver</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    </div>
+  </div>`;
+}
+function renderOppCards(list){
+  if(!list.length) return `<div class="card empty">${icon('target')}<h4>Nenhuma oportunidade encontrada</h4><p>Ajuste os filtros para ver mais resultados.</p></div>`;
+  return `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));">
+    ${list.map(c=>`
+      <div class="card">
+        <div class="row between" style="margin-bottom:8px;">
+          <span class="badge ${c.potencial==='alto'?'badge-blue':c.potencial==='medio'?'badge-warn':'badge-gray'}">${c.potencial==='alto'?'Alto potencial':c.potencial==='medio'?'Potencial médio':'Baixa prioridade'}</span>
+          <span style="font-weight:800;color:${classificacao(c.score).color};font-family:Manrope;">${c.score}</span>
+        </div>
+        <div style="font-weight:700;font-size:14.5px;">${c.nome}</div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:10px;">${c.segmento} · ${c.bairro}</div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:12px;">${c.sinais[0].texto}</div>
+        <div class="row between">
+          <span class="badge ${statusColor(c.status)}">${c.status}</span>
+          <button class="btn btn-sm" data-diag="${c.id}">Ver diagnóstico</button>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
+
+/* ================= DIAGNOSTICO LIST (fallback route) ================= */
+function renderDiagnosticoList(){
+  const top = [...state.companies].sort((a,b)=>b.score-a.score);
+  return `
+  <h1 class="page-title">Diagnósticos</h1>
+  <p class="page-sub">Selecione uma empresa para abrir o diagnóstico completo.</p>
+  <div class="card" style="padding:0;">
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Empresa</th><th>Segmento</th><th>Score</th><th>Confiança</th><th>Última atualização</th><th></th></tr></thead>
+      <tbody>
+      ${top.map(c=>`<tr class="row-hover">
+        <td style="font-weight:600;">${c.nome}</td><td class="muted">${c.segmento}</td>
+        <td style="font-weight:800;color:${classificacao(c.score).color}">${c.score}</td>
+        <td class="muted">${c.confianca}</td><td class="muted">${c.ultimaAtualizacao}</td>
+        <td><button class="btn btn-sm" data-diag="${c.id}">Abrir</button></td>
+      </tr>`).join('')}
+      </tbody>
+    </table>
+    </div>
+  </div>`;
+}
+
+/* ================= DIAGNOSTICO (empresa) ================= */
+let currentDiagId = null;
+function renderDiagnostico(){
+  const idFromRoute = (state.route||'').split('/')[2] || null;
+  const id = idFromRoute || currentDiagId || (state.companies[0] && state.companies[0].id);
+  currentDiagId = id;
+  const c = state.companies.find(x=>x.id===id) || state.companies[0];
+  if(!c){
+    return `<div class="card empty">${icon('stetho')}<h4>Empresa não encontrada</h4><p>Volte para oportunidades e selecione uma empresa.</p><button class="btn btn-primary" data-nav="#/oportunidades">Ver oportunidades</button></div>`;
+  }
+  const cls = classificacao(c.score);
+  const msgs = msgTemplates(c);
+  const tone = state.diagTone;
+
+  return `
+  <button class="btn btn-sm btn-ghost" style="margin-bottom:14px;padding-left:0;" data-nav="#/oportunidades">${icon('arrow')} Voltar para oportunidades</button>
+  <div class="card" style="margin-bottom:18px;">
+    <div class="diag-header">
+      <div style="min-width:240px;">
+        <div class="row gap-12" style="margin-bottom:10px;">
+          <div class="avatar" style="width:44px;height:44px;font-size:15px;background:linear-gradient(135deg,${cls.color},#0b1e2e)">${initials(c.nome)}</div>
+          <div>
+            <h2 style="margin:0;font-size:19px;">${c.nome}</h2>
+            <div class="muted" style="font-size:13px;">${c.segmento} · ${c.bairro}, ${c.cidade}</div>
+          </div>
+        </div>
+        <div class="pill-group" style="margin-bottom:2px;">
+          <span class="badge">${icon('globe')} ${c.site}</span>
+          <span class="badge">${icon('phone')} ${c.telefone}</span>
+          <span class="badge">${icon('star')} ${c.nota} (${c.avaliacoes} avaliações)</span>
+          <span class="badge ${statusColor(c.status)}">${c.status}</span>
+        </div>
+        <div class="muted" style="font-size:11.5px;margin-top:8px;">Última atualização: ${c.ultimaAtualizacao} · Endereço: ${c.endereco}</div>
+      </div>
+      <div class="row gap-8" style="flex:0 0 auto;">
+        <button class="btn" id="monitorBtn">${icon('eye')} Monitorar empresa</button>
+        <button class="btn btn-primary" id="prepBtn">${icon('zap')} Preparar abordagem</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:280px 1fr;align-items:start;margin-bottom:18px;">
+    <div class="card" style="text-align:center;">
+      <div class="card-title" style="text-align:left;">LeadScope Score</div>
+      <div style="display:flex;justify-content:center;margin:8px 0 4px;">${donutSVG(c.score)}</div>
+      <div style="font-weight:700;color:${cls.color};font-size:13.5px;margin-bottom:14px;">${cls.label}</div>
+      <div style="text-align:left;font-size:12.5px;" class="muted">
+        <div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Confiança da análise</span><b style="color:var(--text)">${c.confianca}</b></div>
+        <div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Evidências</span><b style="color:var(--text)">${c.evidencias.length}</b></div>
+        <div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Data da coleta</span><b style="color:var(--text)">${c.ultimaAtualizacao}</b></div>
+        <div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Oferta relacionada</span><b style="color:var(--text);text-align:right;">${state.onboarding.servico||'Gestão digital'}</b></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:20px;">
+        <div>
+          <div class="card-title" style="font-size:13.5px;color:var(--blue-light);">Encontramos</div>
+          ${c.evidencias.map(e=>`
+            <div class="evidence-item">
+              <div style="font-size:13.5px;">${e.texto}</div>
+              <div class="evidence-meta">
+                <span>${icon('doc')} ${e.fonte}</span>
+                <span>${e.data}</span>
+                <span class="badge ${e.confianca==='Alta'?'badge-blue':e.confianca==='Média'?'badge-warn':'badge-gray'}" style="padding:1px 8px;">${e.confianca}</span>
+                <a href="#" style="color:var(--blue-light);text-decoration:none;">Ver evidência →</a>
+              </div>
+            </div>`).join('')}
+        </div>
+        <div>
+          <div class="card-title" style="font-size:13.5px;color:var(--warn);">Isso pode indicar</div>
+          ${c.interpretacoes.map(t=>`<div class="evidence-item" style="background:transparent;">${t}</div>`).join('')}
+          <div class="divider"></div>
+          <div class="card-title" style="font-size:13.5px;color:var(--blue-light);">Recomendamos</div>
+          <div class="evidence-item">
+            <div style="font-weight:700;font-size:13.5px;margin-bottom:4px;">${c.servicoRecomendado}</div>
+            <div class="muted" style="font-size:12.5px;margin-bottom:6px;">Prioridade: <b style="color:var(--text)">${c.potencial==='alto'?'Alta':c.potencial==='medio'?'Média':'Baixa'}</b></div>
+            <div style="font-size:13px;">Ofereça uma revisão da jornada de contato e uma página otimizada para conversão, com foco nos pontos identificados nas evidências.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <div class="card-title">Como abordar</div>
+    <p class="card-sub">Mensagem sugerida, gerada a partir das evidências encontradas. Edite livremente antes de enviar.</p>
+    <div class="tone-tabs">
+      ${['direto','consultivo','informal'].map(t=>`<span class="pill ${tone===t?'active':''}" data-tone="${t}">${t==='direto'?'Direto':t==='consultivo'?'Consultivo':'Informal profissional'}</span>`).join('')}
+    </div>
+    <div class="message-box" id="msgBox" contenteditable="true">${msgs[tone]}</div>
+    <div class="row gap-8" style="margin-top:12px;">
+      <button class="btn btn-sm" id="copyMsg">${icon('copy')} Copiar mensagem</button>
+      <button class="btn btn-sm" id="regenMsg">${icon('zap')} Gerar outra versão</button>
+      <button class="btn btn-sm btn-primary" id="useMsg">${icon('check')} Marcar como utilizada</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="tabs">
+      ${[['perfil','Perfil comercial'],['site','Site'],['avaliacoes','Avaliações'],['jornada','Jornada de contato'],['presenca','Presença digital']].map(([k,l])=>`<span class="tab ${state.detailTab===k?'active':''}" data-detail="${k}">${l}</span>`).join('')}
+    </div>
+    <div style="padding-top:18px;">${renderDetailTab(c, state.detailTab)}</div>
+  </div>
+
+  <div class="card" style="margin-top:18px;">
+    <div class="card-title">Alterar status comercial</div>
+    <div class="pill-group">
+      ${['Nova','Em análise','Priorizada','Abordagem preparada','Contatada','Respondeu','Reunião agendada','Cliente','Descartada'].map(s=>`<span class="pill ${c.status===s?'active':''}" data-setstatus="${s}">${s}</span>`).join('')}
+    </div>
+  </div>
+  `;
+}
+function kv(label,val){ return `<div class="row between" style="padding:9px 0;border-top:1px solid var(--border);font-size:13.5px;"><span class="muted">${label}</span><span style="font-weight:600;text-align:right;">${val}</span></div>`; }
+function boolBadge(v){ return v ? `<span class="badge badge-blue">${icon('check')} Sim</span>` : `<span class="badge badge-warn">${icon('alert')} Não</span>`; }
+function renderDetailTab(c, tab){
+  if(tab==='perfil'){
+    return `
+    ${kv('Categoria', c.perfil.categoria)}
+    ${kv('Endereço', c.endereco)}
+    ${kv('Telefone', c.telefone)}
+    ${kv('Horários', c.perfil.horarios)}
+    ${kv('Site', c.site)}
+    ${kv('Nota', c.nota+' / 5.0')}
+    ${kv('Número de avaliações', c.avaliacoes)}
+    ${kv('Percentual de avaliações respondidas', c.perfil.respondeuAvaliacoes ? '≈ 80%' : '≈ 10%')}
+    ${kv('Completude estimada do perfil', c.perfil.completude+'%')}
+    `;
+  }
+  if(tab==='site'){
+    return `
+    ${kv('HTTPS', boolBadge(c.siteInfo.https))}
+    ${kv('Responsividade (mobile)', boolBadge(c.siteInfo.responsivo))}
+    ${kv('Agendamento online', boolBadge(c.siteInfo.agendamento))}
+    ${kv('WhatsApp visível', boolBadge(c.siteInfo.whatsappVisivel))}
+    ${kv('Formulário de contato', boolBadge(c.siteInfo.formularioOk))}
+    ${kv('SEO técnico básico', boolBadge(c.siteInfo.seoBasico))}
+    `;
+  }
+  if(tab==='avaliacoes'){
+    return `
+    ${kv('Nota média', c.nota)}
+    ${kv('Volume', c.avaliacoes)}
+    ${kv('Sentimento predominante', c.avaliacoesInfo.sentimento)}
+    ${kv('Temas recorrentes', c.avaliacoesInfo.temas.join(', '))}
+    <div class="divider"></div>
+    <div class="badge badge-warn" style="display:block;padding:10px 12px;line-height:1.5;">${icon('alert')} As avaliações são sinais públicos e não comprovam, isoladamente, a qualidade operacional da empresa.</div>
+    `;
+  }
+  if(tab==='jornada'){
+    return `
+    ${kv('Etapas até o contato', c.jornada.etapas)}
+    ${kv('WhatsApp disponível', boolBadge(c.jornada.whatsapp))}
+    ${kv('Formulário disponível', boolBadge(c.jornada.formulario))}
+    ${kv('Agendamento online disponível', boolBadge(c.jornada.agendamentoOnline))}
+    `;
+  }
+  if(tab==='presenca'){
+    return `
+    ${kv('Redes encontradas', c.presenca.redesEncontradas.join(', '))}
+    ${kv('Frequência aparente de publicações', c.presenca.frequencia)}
+    ${kv('Consistência das informações', 'Alta')}
+    `;
+  }
+  return '';
+}
+function bindDiagnostico(){
+  document.querySelectorAll('[data-tone]').forEach(el=>{
+    el.addEventListener('click', ()=> setState({diagTone: el.getAttribute('data-tone')}));
+  });
+  document.querySelectorAll('[data-detail]').forEach(el=>{
+    el.addEventListener('click', ()=> setState({detailTab: el.getAttribute('data-detail')}));
+  });
+  document.querySelectorAll('[data-setstatus]').forEach(el=>{
+    el.addEventListener('click', async ()=>{
+      const c = state.companies.find(x=>x.id===currentDiagId);
+      const novoStatus = el.getAttribute('data-setstatus');
+      c.status = novoStatus;
+      render();
+      toast('Status atualizado para "'+novoStatus+'".');
+      try{ await persistCompanyField(c.id, {status: novoStatus}); }
+      catch(e){ toast('Não foi possível salvar o status agora.'); }
+    });
+  });
+  const copyBtn = document.getElementById('copyMsg');
+  if(copyBtn) copyBtn.addEventListener('click', async ()=>{
+    const c = state.companies.find(x=>x.id===currentDiagId);
+    const txt = document.getElementById('msgBox').innerText;
+    try{ navigator.clipboard.writeText(txt); }catch(e){}
+    flashButton(copyBtn, 'Copiado');
+    toast('Mensagem copiada para a área de transferência.');
+    try{ await persistCompanyField(c.id, {mensagem_gerada:txt, mensagem_tom: state.diagTone}); }catch(e){}
+  });
+  const regen = document.getElementById('regenMsg');
+  if(regen) regen.addEventListener('click', ()=>{
+    const tones=['direto','consultivo','informal'];
+    const next = tones[(tones.indexOf(state.diagTone)+1)%tones.length];
+    setState({diagTone: next});
+  });
+  const use = document.getElementById('useMsg');
+  if(use) use.addEventListener('click', async ()=>{
+    const c = state.companies.find(x=>x.id===currentDiagId);
+    c.mensagemUtilizada = true;
+    flashButton(use, 'Utilizada');
+    toast('Mensagem marcada como utilizada.');
+    try{ await persistCompanyField(c.id, {mensagem_utilizada:true, mensagem_tom: state.diagTone}); }catch(e){}
+  });
+  const monitor = document.getElementById('monitorBtn');
+  if(monitor) monitor.addEventListener('click', async ()=>{
+    const c = state.companies.find(x=>x.id===currentDiagId);
+    c.monitorada = true;
+    flashButton(monitor, 'Monitorando');
+    toast('Empresa adicionada ao monitoramento.');
+    try{ await persistCompanyField(c.id, {monitorada:true}); }catch(e){}
+  });
+  const prep = document.getElementById('prepBtn');
+  if(prep) prep.addEventListener('click', ()=>{ flashButton(prep, 'Preparada'); toast('Abordagem preparada e pronta para envio.'); });
+}
+
+/* ================= MONITORADAS ================= */
+function renderMonitoradas(){
+  const monitored = state.companies.filter(c=>c.monitorada);
+  const alerts = [
+    'Nova avaliação negativa', 'Queda na nota média', 'Site ficou indisponível', 'Formulário deixou de funcionar',
+    'Alteração de telefone', 'Novo canal de contato', 'Aumento no volume de avaliações', 'Concorrente melhorou sua presença digital'
+  ];
+  if(!monitored.length){
+    return `
+    <h1 class="page-title">Empresas monitoradas</h1>
+    <p class="page-sub">Acompanhe mudanças recentes nas empresas de interesse.</p>
+    <div class="card empty">${icon('building')}<h4>Nenhuma empresa monitorada ainda</h4><p>Abra o diagnóstico de uma oportunidade e clique em "Monitorar empresa" para acompanhá-la aqui.</p><button class="btn btn-primary" data-nav="#/oportunidades">Ver oportunidades</button></div>`;
+  }
+  return `
+  <h1 class="page-title">Empresas monitoradas</h1>
+  <p class="page-sub">Acompanhe mudanças recentes nas empresas de interesse. Alertas simulados nesta versão.</p>
+  <div class="card" style="margin-bottom:18px;">
+    <div class="row gap-12 wrap between">
+      <span class="muted" style="font-size:13px;">Frequência de verificação</span>
+      <div class="pill-group">
+        <span class="pill active">Diária</span><span class="pill">Semanal</span><span class="pill">Mensal</span>
+      </div>
+    </div>
+  </div>
+  <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr));">
+    ${monitored.map((c,idx)=>`
+      <div class="card">
+        <div class="row between" style="margin-bottom:8px;">
+          <span style="font-weight:700;font-size:14px;">${c.nome}</span>
+          <span class="badge ${statusColor(c.status)}">${c.status}</span>
+        </div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:12px;">${c.segmento} · ${c.bairro}</div>
+        <div class="badge badge-warn" style="display:flex;margin-bottom:8px;">${icon('alert')} ${alerts[idx%alerts.length]}</div>
+        <div class="muted" style="font-size:11.5px;">Detectado em ${c.ultimaAtualizacao}</div>
+        <div class="divider"></div>
+        <button class="btn btn-sm btn-block" data-diag="${c.id}">Ver diagnóstico atualizado</button>
+      </div>`).join('')}
+  </div>`;
+}
+
+/* ================= RELATORIOS ================= */
+function renderRelatorios(){
+  return `
+  <h1 class="page-title">Relatórios</h1>
+  <p class="page-sub">Gere relatórios compartilháveis, prontos para apresentar a clientes-piloto.</p>
+  <div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:20px;">
+    ${[['Diagnóstico de empresa','stetho'],['Relatório de oportunidades','doc'],['Comparação entre empresas','grid'],['Relatório de resultados do piloto','trophy']].map(([t,ic])=>`
+      <div class="card" style="text-align:center;cursor:pointer;" data-reporttype="${t}">
+        <div style="margin:0 auto 10px;width:40px;height:40px;border-radius:10px;background:rgba(52,120,246,.12);display:flex;align-items:center;justify-content:center;color:var(--blue-light);">${icon(ic)}</div>
+        <div style="font-weight:600;font-size:13.5px;">${t}</div>
+      </div>`).join('')}
+  </div>
+  <div class="grid" style="grid-template-columns:1fr 1fr;align-items:start;">
+    <div class="card">
+      <div class="card-title">Configurar relatório</div>
+      <div class="field"><label class="label">Empresas incluídas</label>
+        <select class="input" multiple size="5">${state.companies.slice(0,8).map(c=>`<option selected>${c.nome}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label class="label">Seções</label>
+        <div class="checkbox-row"><input type="checkbox" checked> Evidências e diagnóstico</div>
+        <div class="checkbox-row"><input type="checkbox" checked> Serviço recomendado</div>
+        <div class="checkbox-row"><input type="checkbox"> Histórico de abordagem</div>
+        <div class="checkbox-row"><input type="checkbox" checked> Indicadores de resultado</div>
+      </div>
+      <div class="field"><label class="label">Logotipo da agência (white-label)</label><input class="input" placeholder="URL do logotipo ou upload"></div>
+      <div class="field"><label class="label">Comentários</label><textarea class="input" rows="3" placeholder="Adicione um comentário para o cliente-piloto..."></textarea></div>
+      <div class="row gap-8">
+        <button class="btn" id="previewReport">Gerar prévia</button>
+        <button class="btn btn-primary" id="exportReport">${icon('dl')} Simular exportação em PDF</button>
+      </div>
+    </div>
+    <div class="card" id="reportPreview">
+      <div class="empty">${icon('doc')}<h4>Nenhuma prévia gerada</h4><p>Configure as opções ao lado e clique em "Gerar prévia".</p></div>
+    </div>
+  </div>`;
+}
+function bindRelatorios(){
+  const prev = document.getElementById('previewReport');
+  const exp = document.getElementById('exportReport');
+  if(prev) prev.addEventListener('click', ()=>{
+    document.getElementById('reportPreview').innerHTML = `
+      <div class="card-title">Prévia — Relatório de oportunidades</div>
+      <p class="muted" style="font-size:12.5px;">${state.user.empresa} · gerado em ${fmtDate(new Date())}</p>
+      <div class="divider"></div>
+      ${state.companies.slice(0,5).map(c=>`
+        <div class="row between" style="padding:8px 0;border-top:1px solid var(--border);font-size:13px;">
+          <span>${c.nome}</span><span style="font-weight:700;color:${classificacao(c.score).color}">${c.score}</span>
+        </div>`).join('')}
+    `;
+    flashButton(prev, 'Gerada');
+    toast('Prévia do relatório gerada com sucesso.');
+  });
+  if(exp) exp.addEventListener('click', ()=>{ flashButton(exp, 'Exportado'); toast('Exportação em PDF simulada com sucesso.'); });
+}
+
+/* ================= RESULTADOS ================= */
+function renderResultados(){
+  const cs = state.companies;
+  const analisadas = cs.length;
+  const abordadas = cs.filter(c=>c.status!=='Nova').length;
+  const respostas = cs.filter(c=>['Respondeu','Reunião agendada','Cliente'].includes(c.status)).length;
+  const reunioes = cs.filter(c=>['Reunião agendada','Cliente'].includes(c.status)).length;
+  const propostas = cs.filter(c=>c.status==='Cliente').length;
+  const vendas = cs.filter(c=>c.resultado==='venda').length;
+  const receita = vendas*1500 + Math.floor(Math.random()*0);
+  const chart = [{label:'Site',v:22},{label:'S/ resposta',v:18},{label:'S/ agenda',v:31},{label:'Perfil incomp.',v:12}];
+
+  return `
+  <h1 class="page-title">Resultados</h1>
+  <p class="page-sub">Relação entre diagnósticos gerados e resultados comerciais obtidos.</p>
+  <div class="kpi-grid" style="margin-bottom:20px;">
+    ${[['Oportunidades analisadas',analisadas],['Abordagens realizadas',abordadas],['Respostas',respostas],['Reuniões',reunioes],['Propostas / Clientes',propostas],['Vendas',vendas],['Receita gerada (estimada)','R$ '+receita.toLocaleString('pt-BR')]].map(([l,v])=>`
+      <div class="kpi-card"><div class="kpi-label">${l}</div><div class="kpi-val">${v}</div></div>`).join('')}
+  </div>
+  <div class="grid" style="grid-template-columns:1.2fr 1fr;align-items:start;margin-bottom:20px;">
+    <div class="card">
+      <div class="card-title">Sinais que mais geraram resposta e reuniões</div>
+      <p class="card-sub">Percentual de resposta por tipo de sinal identificado (dados demonstrativos).</p>
+      ${barChartSVG(chart)}
+    </div>
+    <div class="card">
+      <div class="card-title">Registrar resultado por empresa</div>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th>Empresa</th><th>Resultado</th></tr></thead>
+        <tbody>
+        ${cs.slice(0,8).map(c=>`
+          <tr class="row-hover"><td style="max-width:150px;">${c.nome}</td>
+          <td><select class="input" data-result="${c.id}">
+            ${['Sem contato','Sem resposta','Respondeu','Sem interesse','Reunião','Proposta','Venda'].map(o=>`<option ${matchResult(c,o)?'selected':''}>${o}</option>`).join('')}
+          </select></td></tr>`).join('')}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>`;
+}
+function matchResult(c,label){
+  const map = {'Nova':'Sem contato','Em análise':'Sem contato','Priorizada':'Sem contato','Abordagem preparada':'Sem contato','Contatada':'Sem resposta','Respondeu':'Respondeu','Reunião agendada':'Reunião','Cliente':'Venda','Descartada':'Sem interesse'};
+  return map[c.status]===label;
+}
+
+/* ================= CONFIGURACOES ================= */
+function renderConfiguracoes(){
+  const ob = state.onboarding;
+  const tab = state.configTab || 'perfil';
+  const tabs = [['perfil','Perfil'],['empresa','Empresa'],['oferta','Oferta comercial'],['cliente','Cliente ideal'],['score','Critérios do score'],['usuarios','Usuários'],['integracoes','Integrações'],['plano','Plano e uso'],['privacidade','Privacidade e bloqueios']];
+  let inner = '';
+  if(tab==='perfil'){
+    inner = `
+      <div class="field"><label class="label">Nome</label><input class="input" data-cfg="user.nome" value="${esc(state.user.nome)}"></div>
+      <div class="field"><label class="label">E-mail</label><input class="input" data-cfg="user.email" value="${esc(state.user.email)}"></div>
+      <div class="field"><label class="label">Cargo</label><input class="input" data-cfg="user.cargo" value="${esc(state.user.cargo)}"></div>`;
+  } else if(tab==='empresa'){
+    inner = `
+      <div class="field"><label class="label">Nome da empresa</label><input class="input" data-cfg="onboarding.empresa" value="${esc(ob.empresa)}"></div>
+      <div class="field"><label class="label">Site</label><input class="input" data-cfg="onboarding.site" value="${esc(ob.site)}"></div>
+      <div class="field"><label class="label">Segmento</label><input class="input" data-cfg="onboarding.segmento" value="${esc(ob.segmento)}"></div>
+      <div class="field"><label class="label">Cidade e estado</label><input class="input" data-cfg="onboarding.cidade" value="${esc(ob.cidade)}"></div>`;
+  } else if(tab==='oferta'){
+    inner = `
+      <div class="field"><label class="label">Serviço principal vendido</label><input class="input" data-cfg="onboarding.servico" value="${esc(ob.servico)}"></div>
+      <div class="field"><label class="label">Ticket médio</label><input class="input" data-cfg="onboarding.ticket" value="${esc(ob.ticket)}"></div>
+      <div class="field"><label class="label">Descrição da oferta</label><textarea class="input" rows="3" data-cfg="onboarding.descricao">${esc(ob.descricao)}</textarea></div>`;
+  } else if(tab==='cliente'){
+    inner = `
+      <div class="field"><label class="label">Segmentos desejados</label><input class="input" data-cfg="onboarding.segmentosDesejados" value="${esc(ob.segmentosDesejados)}"></div>
+      <div class="field"><label class="label">Região</label><input class="input" data-cfg="onboarding.regiao" value="${esc(ob.regiao)}"></div>
+      <div class="field"><label class="label">Palavras-chave</label><input class="input" data-cfg="onboarding.palavrasChave" value="${esc(ob.palavrasChave)}"></div>`;
+  } else if(tab==='score'){
+    const criterios = [['google','Qualidade do perfil no Google'],['site','Qualidade do site'],['reputacao','Reputação e avaliações'],['contato','Facilidade de contato'],['presenca','Presença digital'],['compatibilidade','Compatibilidade com a oferta'],['urgencia','Sinais de urgência']];
+    inner = `<div class="badge badge-blue" style="display:block;padding:10px 12px;margin-bottom:16px;">${icon('zap')} O LeadScope Score é totalmente configurável e explicável — cada peso influencia diretamente o cálculo.</div>` +
+      criterios.map(([k,label])=>`
+      <div class="field">
+        <div class="row between" style="margin-bottom:6px;"><label class="label" style="margin:0;">${label}</label><span class="muted" id="cv_${k}">${ob.pesos[k]}%</span></div>
+        <input type="range" class="slider" min="0" max="100" value="${ob.pesos[k]}" data-cpeso="${k}">
+      </div>`).join('');
+  } else if(tab==='usuarios'){
+    inner = `
+      <div class="table-scroll"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th></th></tr></thead>
+      <tbody>
+      <tr><td>${state.user.nome}</td><td class="muted">felipe@quantisgrowth.com.br</td><td><span class="badge badge-blue">Administrador</span></td><td></td></tr>
+      <tr><td class="muted">Convidar novo usuário</td><td class="muted">—</td><td class="muted">—</td><td><button class="btn btn-sm">Convidar</button></td></tr>
+      </tbody></table></div>`;
+  } else if(tab==='integracoes'){
+    inner = `
+      ${[['Google Business Profile','Preparado para integração futura com API autorizada'],['Instagram / Meta','Preparado para integração futura'],['Supabase','Banco de dados para autenticação e persistência multiempresa'],['CRM externo','Exportação de oportunidades priorizadas']].map(([n,d])=>`
+      <div class="row between" style="padding:12px 0;border-top:1px solid var(--border);">
+        <div><div style="font-weight:600;font-size:13.5px;">${n}</div><div class="muted" style="font-size:12px;">${d}</div></div>
+        <span class="badge badge-gray">Não conectado</span>
+      </div>`).join('')}`;
+  } else if(tab==='plano'){
+    inner = `
+      <div class="badge badge-blue" style="display:block;padding:14px;margin-bottom:14px;">Plano atual: <b>${state.user.plano}</b> · até 20 oportunidades analisadas por radar</div>
+      ${kv('Radares ativos', state.radars.length)}
+      ${kv('Empresas analisadas no mês', state.companies.length)}
+      ${kv('Relatórios gerados', 3)}
+      ${kv('Usuários na conta', 1)}`;
+  } else if(tab==='privacidade'){
+    inner = `
+      <div class="checkbox-row"><input type="checkbox" checked> Não coletar dados de contato pessoal de colaboradores das empresas analisadas</div>
+      <div class="checkbox-row"><input type="checkbox" checked> Utilizar apenas sinais públicos e verificáveis</div>
+      <div class="checkbox-row"><input type="checkbox"> Bloquear empresas específicas da prospecção</div>
+      <div class="field" style="margin-top:12px;"><label class="label">Domínios ou empresas bloqueadas</label><textarea class="input" rows="3" placeholder="Um por linha"></textarea></div>`;
+  }
+  return `
+  <h1 class="page-title">Configurações</h1>
+  <p class="page-sub">Gerencie seu perfil, oferta comercial, critérios de score e integrações.</p>
+  <div class="grid" style="grid-template-columns:220px 1fr;align-items:start;">
+    <div class="card" style="padding:10px;">
+      ${tabs.map(([k,l])=>`<div class="nav-item" style="padding:9px 14px;border-radius:8px;" data-configtab="${k}" data-active="${tab===k}">${l}</div>`).join('')}
+    </div>
+    <div class="card">${inner}
+      <div class="divider"></div>
+      <button class="btn btn-primary" id="saveConfig">Salvar alterações</button>
+    </div>
+  </div>`;
+}
+
+/* ================= EVENT BINDING PER PAGE ================= */
+function bindPageEvents(route){
+  document.querySelectorAll('[data-diag]').forEach(el=>{
+    el.addEventListener('click', ()=>{ currentDiagId = el.getAttribute('data-diag'); setState({route:'#/diagnostico/'+currentDiagId}); });
+  });
+  if(route==='radar') bindRadarProcessing();
+  if(route==='oportunidades') bindOportunidades();
+  if(route.startsWith('diag')||route==='empresa') bindDiagnostico();
+  if(route==='relatorios') bindRelatorios();
+  if(route==='resultados') bindResultados();
+  if(route==='configuracoes') bindConfiguracoes();
+  const topSearch = document.getElementById('topSearch');
+  if(topSearch) topSearch.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter'){ toast('Buscando por "'+topSearch.value+'"...'); }
+  });
+}
+function bindOportunidades(){
+  const vt = document.getElementById('viewTabela'), vc = document.getElementById('viewCards');
+  if(vt) vt.addEventListener('click', ()=>{ state.oppFilters.view='tabela'; setState({}); });
+  if(vc) vc.addEventListener('click', ()=>{ state.oppFilters.view='cards'; setState({}); });
+  const fp = document.getElementById('fPotencial'), fs = document.getElementById('fStatus');
+  if(fp) fp.addEventListener('change', ()=>{ state.oppFilters.potencial=fp.value; setState({}); });
+  if(fs) fs.addEventListener('change', ()=>{ state.oppFilters.status=fs.value; setState({}); });
+  document.querySelectorAll('.selOpp').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const id = cb.getAttribute('data-id');
+      if(cb.checked) state.selectedOpps.push(id); else state.selectedOpps = state.selectedOpps.filter(x=>x!==id);
+      render();
+    });
+  });
+  const exp = document.getElementById('exportCsv');
+  if(exp) exp.addEventListener('click', ()=>{ flashButton(exp, 'Exportado'); toast('Exportação CSV simulada — '+state.companies.length+' linhas.'); });
+  const bm = document.getElementById('bulkMonitor');
+  if(bm) bm.addEventListener('click', async ()=>{
+    const ids = state.selectedOpps.slice();
+    ids.forEach(id=>{ const c=state.companies.find(x=>x.id===id); if(c) c.monitorada=true; });
+    toast(ids.length+' empresas marcadas para monitoramento.'); state.selectedOpps=[]; render();
+    try{ await sb.from('empresas').update({monitorada:true}).in('id', ids); }catch(e){}
+  });
+  const bs = document.getElementById('bulkStatus');
+  if(bs) bs.addEventListener('click', async ()=>{
+    const ids = state.selectedOpps.slice();
+    ids.forEach(id=>{ const c=state.companies.find(x=>x.id===id); if(c) c.status='Priorizada'; });
+    toast('Status atualizado em massa.'); state.selectedOpps=[]; render();
+    try{ await sb.from('empresas').update({status:'Priorizada'}).in('id', ids); }catch(e){}
+  });
+}
+function bindResultados(){
+  document.querySelectorAll('[data-result]').forEach(sel=>{
+    sel.addEventListener('change', async ()=>{
+      const c = state.companies.find(x=>x.id===sel.getAttribute('data-result'));
+      const map = {'Sem contato':'Nova','Sem resposta':'Contatada','Respondeu':'Respondeu','Sem interesse':'Descartada','Reunião':'Reunião agendada','Proposta':'Reunião agendada','Venda':'Cliente'};
+      c.status = map[sel.value] || c.status;
+      c.resultado = sel.value==='Venda' ? 'venda' : null;
+      toast('Resultado registrado para '+c.nome+'.');
+      try{ await persistCompanyField(c.id, {status:c.status, resultado:c.resultado}); }catch(e){ toast('Não foi possível salvar agora.'); }
+    });
+  });
+}
+function bindConfiguracoes(){
+  document.querySelectorAll('[data-configtab]').forEach(el=>{
+    el.addEventListener('click', ()=>{ setState({configTab: el.getAttribute('data-configtab')}); });
+  });
+  document.querySelectorAll('[data-cpeso]').forEach(sl=>{
+    sl.addEventListener('input', ()=>{
+      const k = sl.getAttribute('data-cpeso');
+      state.onboarding.pesos[k] = +sl.value;
+      document.getElementById('cv_'+k).textContent = sl.value+'%';
+    });
+  });
+  const save = document.getElementById('saveConfig');
+  if(save) save.addEventListener('click', async ()=>{
+    document.querySelectorAll('[data-cfg]').forEach(el=>{
+      setPath(state, el.getAttribute('data-cfg'), el.value);
+    });
+    try{
+      await persistSettingsPartial();
+      if(state.userId){
+        await sb.from('profiles').update({nome:state.user.nome, email:state.user.email, cargo:state.user.cargo}).eq('id', state.userId);
+      }
+    }catch(e){ toast('Não foi possível salvar agora.'); }
+    render();
+    flashButton(document.getElementById('saveConfig'), 'Salvo');
+    toast('Configurações salvas com sucesso.');
+  });
+}
+
+/* ================= INIT ================= */
+// style active state for configtab nav items (since CSS uses .active class via JS attr)
+document.addEventListener('click', (e)=>{
+  const t = e.target.closest('[data-configtab]');
+  if(t){
+    document.querySelectorAll('[data-configtab]').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+  }
+});
+
+if(location.hash) state.route = location.hash;
+bootAuth();
+// fix initial active class for configuracoes on first paint
+setTimeout(()=>{
+  document.querySelectorAll('[data-configtab]').forEach(x=>{
+    if(x.getAttribute('data-active')==='true') x.classList.add('active');
+  });
+},0);
+</script>
+</body>
+</html>
