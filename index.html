@@ -292,7 +292,7 @@ function rowToCompany(row, evidenciaRows){
     monitorada: !!row.monitorada,
     mensagemGerada: row.mensagem_gerada, mensagemTom: row.mensagem_tom || 'consultivo', mensagemUtilizada: !!row.mensagem_utilizada,
     perfil:{
-      categoria:'Clínica odontológica', horarios:'Seg a sex, 8h às 19h',
+      categoria:row.segmento || 'Não informada', horarios:'Seg a sex, 8h às 19h',
       respondeuAvaliacoes: !sinais.some(s=>s.key==='semResposta'),
       completude: sinais.some(s=>s.key==='perfilIncompleto') ? 62 : 94,
     },
@@ -322,6 +322,18 @@ function rowToCompany(row, evidenciaRows){
 
 function companyLocation(company){
   return company.bairro || company.cidade || company.endereco || 'Não informado';
+}
+
+function externalSiteLink(site){
+  if(!site) return '<span class="muted">Não informado</span>';
+  const normalized=/^https?:\/\//i.test(site) ? site : 'https://'+site;
+  try{
+    const parsed=new URL(normalized);
+    if(!['http:','https:'].includes(parsed.protocol)) throw new Error('Protocolo inválido');
+    return `<a href="${esc(parsed.href)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue-light);text-decoration:none;overflow-wrap:anywhere;">${esc(site)} ↗</a>`;
+  }catch(ignore){
+    return esc(site);
+  }
 }
 
 // Mapeamento entre os nomes usados nas telas (camelCase) e as colunas do Supabase (snake_case)
@@ -1265,7 +1277,7 @@ function renderDiagnostico(){
           </div>
         </div>
         <div class="pill-group" style="margin-bottom:2px;">
-          <span class="badge">${icon('globe')} ${c.site}</span>
+          <span class="badge">${icon('globe')} ${externalSiteLink(c.site)}</span>
           <span class="badge">${icon('phone')} ${c.telefone}</span>
           <span class="badge">${icon('star')} ${c.nota} (${c.avaliacoes} avaliações)</span>
           <span class="badge ${statusColor(c.status)}">${c.status}</span>
@@ -1360,7 +1372,7 @@ function renderDetailTab(c, tab){
     ${kv('Endereço', c.endereco)}
     ${kv('Telefone', c.telefone)}
     ${kv('Horários', c.perfil.horarios)}
-    ${kv('Site', c.site)}
+    ${kv('Site', externalSiteLink(c.site))}
     ${kv('Nota', c.nota+' / 5.0')}
     ${kv('Número de avaliações', c.avaliacoes)}
     ${kv('Percentual de avaliações respondidas', c.perfil.respondeuAvaliacoes ? '≈ 80%' : '≈ 10%')}
