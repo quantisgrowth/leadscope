@@ -24,6 +24,22 @@ function cleanText(value: unknown, max = 160) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
 }
 
+async function describeGoogleError(response: Response) {
+  const fallback = `Google Places respondeu com status ${response.status}.`;
+  try {
+    const payload = await response.json();
+    const googleError = payload?.error;
+    const reason = Array.isArray(googleError?.details)
+      ? googleError.details.find((detail: { reason?: string }) => detail?.reason)?.reason
+      : undefined;
+    const message = cleanText(googleError?.message, 420);
+    const code = cleanText(reason || googleError?.status, 80);
+    return [fallback, code && `Código: ${code}.`, message].filter(Boolean).join(" ");
+  } catch {
+    return fallback;
+  }
+}
+
 function scorePlace(place: Place) {
   const profile = Math.min(20, 7 + (place.formattedAddress ? 4 : 0) + (place.businessStatus === "OPERATIONAL" ? 4 : 0) + (place.rating ? 5 : 0));
   const opportunity = place.websiteUri ? 9 : 25;
@@ -64,7 +80,11 @@ export default {
         headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": GOOGLE_FIELDS },
         body: JSON.stringify({ textQuery: `${query} em ${location}`, languageCode: "pt-BR", regionCode: "BR", pageSize: limit }),
       });
-      if (!googleResponse.ok) throw new Error(`Google Places respondeu com status ${googleResponse.status}.`);
+      if (!googleResponse.ok) {
+        const googleError = await describeGoogleError(googleResponse);
+        console.error(JSON.stringify({ event: "google_places_error", status: googleResponse.status, message: googleError }));
+        throw new Error(googleError);
+      }
       const payload = await googleResponse.json();
       const places: Place[] = Array.isArray(payload.places) ? payload.places : [];
       const saved = [];
