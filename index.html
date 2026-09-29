@@ -1508,7 +1508,7 @@ function renderDetailTab(c, tab){
     ${kv('SEO técnico básico', verificationBadge(c.siteInfo.seoBasico))}
     ${evidence.length?`<div style="margin-top:14px;"><div class="card-title" style="font-size:13.5px;">Evidências da auditoria</div>${evidence.map(item=>`<div class="evidence-item" style="padding:10px 12px;font-size:12.5px;">${esc(item.description||'')}</div>`).join('')}</div>`:''}
     <div style="margin-top:14px;">
-      <button class="btn btn-primary" id="auditSiteBtn" ${!c.site||processing?'disabled':''}>${processing?'Auditando…':completed?'Auditar novamente':'Auditar site'}</button>
+      <button class="btn btn-primary" id="auditSiteBtn" ${!c.site?'disabled':''}>${processing?'Atualizar auditoria':completed?'Auditar novamente':'Auditar site'}</button>
       ${!c.site?'<span class="muted" style="font-size:12px;margin-left:10px;">Site não informado no perfil público.</span>':''}
     </div>
     `;
@@ -1553,11 +1553,18 @@ async function runSiteAudit(){
   const button=document.getElementById('auditSiteBtn');
   if(!company||!company.site||!button) return;
   const force=!!(company.siteAudit&&company.siteAudit.status==='concluido');
+  const existingProcessing=company.siteAudit&&['pendente','processando'].includes(company.siteAudit.status)?company.siteAudit:null;
   button.disabled=true;
-  button.textContent='Iniciando auditoria…';
+  button.textContent=existingProcessing?'Consultando auditoria…':'Iniciando auditoria…';
   try{
-    const {data:startData,error:startError}=await sb.functions.invoke('audit-site',{body:{action:'start',company_id:company.id,force}});
-    if(startError) throw new Error(await edgeFunctionErrorMessage(startError));
+    let startData;
+    if(existingProcessing){
+      startData={status:'processando',audit_id:existingProcessing.id};
+    }else{
+      const startResponse=await sb.functions.invoke('audit-site',{body:{action:'start',company_id:company.id,force}});
+      if(startResponse.error) throw new Error(await edgeFunctionErrorMessage(startResponse.error));
+      startData=startResponse.data;
+    }
     if(startData&&startData.error) throw new Error(startData.error);
     if(startData&&startData.status==='concluido'){
       await loadAllData(state.userId);
