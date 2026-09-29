@@ -294,7 +294,7 @@ function formatOpeningHours(sourcePayload){
 function sinaisFromKeys(keys){ return (keys||[]).map(k=>SIGNAL_POOL.find(s=>s.key===k)).filter(Boolean); }
 
 // Converte uma linha da tabela `empresas` (+ suas `evidencias`) no formato que as telas usam.
-function rowToCompany(row, evidenciaRows){
+function rowToCompany(row, evidenciaRows, latestAudit){
   const sinais = sinaisFromKeys(row.sinais_keys);
   const sourceLabel=row.source_provider==='google_maps'?'Google Maps via Apify':'Fonte pública';
   if(!sinais.length) sinais.push({key:'perfilPublico', texto:'Estabelecimento localizado em uma fonte pública', fonte:sourceLabel, interpretacao:'Há dados públicos suficientes para iniciar uma qualificação comercial', servico:4});
@@ -305,10 +305,13 @@ function rowToCompany(row, evidenciaRows){
   }));
   const sourcePayload=row.source_payload&&typeof row.source_payload==='object' ? row.source_payload : {};
   const collectedCategories=Array.isArray(sourcePayload.categories) ? sourcePayload.categories.filter(Boolean) : [];
+  const completedAudit=latestAudit&&latestAudit.status==='concluido' ? latestAudit : null;
+  const auditChecks=completedAudit&&completedAudit.checks&&typeof completedAudit.checks==='object' ? completedAudit.checks : {};
   return {
     id:row.id, nome:row.nome, segmento:row.segmento, cidade:row.cidade, bairro:row.bairro, endereco:row.endereco,
     telefone:row.telefone, site:row.site, redes:row.redes||[], nota:row.nota, avaliacoes:row.avaliacoes,
     categorias:[...new Set([row.segmento,...collectedCategories].filter(Boolean))], sourcePayload,
+    siteAudit:latestAudit||null,
     score:row.score, confianca:row.confianca, potencial:row.potencial,
     sinais, evidencias,
     interpretacoes:[...new Set(sinais.map(s=>s.interpretacao))].slice(0,3),
@@ -323,8 +326,12 @@ function rowToCompany(row, evidenciaRows){
       respondeuAvaliacoes:null, completude:null,
     },
     siteInfo:{
-      https: row.site ? /^https:\/\//i.test(row.site) : null,
-      responsivo:null, agendamento:null, whatsappVisivel:null, formularioOk:null, seoBasico:null,
+      https: completedAudit ? auditChecks.https : (row.site ? /^https:\/\//i.test(row.site) : null),
+      responsivo:completedAudit ? auditChecks.responsive : null,
+      agendamento:completedAudit ? auditChecks.booking : null,
+      whatsappVisivel:completedAudit ? auditChecks.whatsapp : null,
+      formularioOk:completedAudit ? auditChecks.form : null,
+      seoBasico:completedAudit ? auditChecks.seo : null,
     },
     avaliacoesInfo:{
       sentimento:null, temas:[],
@@ -431,16 +438,23 @@ const setPath = setPathLocal;
 
 /* ================= SUPABASE: CARREGAR / GRAVAR DADOS ================= */
 async function loadAllData(userId){
-  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}] = await Promise.all([
+  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}, {data:siteAuditRows}] = await Promise.all([
     sb.from('profiles').select('*').eq('id', userId).maybeSingle(),
     sb.from('account_settings').select('*').eq('user_id', userId).maybeSingle(),
     sb.from('radares').select('*').eq('user_id', userId).order('criado_em', {ascending:false}),
     sb.from('empresas').select('*').eq('user_id', userId).order('score', {ascending:false}),
     sb.from('evidencias').select('*').order('data', {ascending:false}),
+    sb.from('site_audits').select('*').eq('user_id', userId).order('created_at', {ascending:false}),
   ]);
   const evByEmpresa = {};
   (evidenciasRows||[]).forEach(e=>{ (evByEmpresa[e.empresa_id] = evByEmpresa[e.empresa_id]||[]).push(e); });
-  const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id]));
+  const auditsByEmpresa={};
+  (siteAuditRows||[]).forEach(audit=>{ (auditsByEmpresa[audit.empresa_id]=auditsByEmpresa[audit.empresa_id]||[]).push(audit); });
+  const latestAuditByEmpresa={};
+  Object.entries(auditsByEmpresa).forEach(([empresaId,audits])=>{
+    latestAuditByEmpresa[empresaId]=audits.find(audit=>['pendente','processando'].includes(audit.status))||audits.find(audit=>audit.status==='concluido')||audits[0];
+  });
+  const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id], latestAuditByEmpresa[row.id]));
   const ob = rowToOnboarding(settings) || state.onboarding;
   setState({
     userId,
@@ -1475,14 +1489,28 @@ function renderDetailTab(c, tab){
     `;
   }
   if(tab==='site'){
+    const audit=c.siteAudit;
+    const completed=audit&&audit.status==='concluido';
+    const processing=audit&&['pendente','processando'].includes(audit.status);
+    const evidence=completed&&Array.isArray(audit.evidence)?audit.evidence:[];
     return `
-    <div class="verification-note">Apenas o protocolo HTTPS pode ser identificado pelo endereço coletado. Os demais itens exigem uma auditoria técnica do site e, enquanto ela não for executada, não são apresentados como fatos nem influenciam o diagnóstico.</div>
+    <div class="verification-note">${completed
+      ? `Auditoria técnica concluída em ${esc(fmtDate(new Date(audit.finished_at||audit.created_at)))}. Os resultados abaixo vieram de uma visita real à página inicial em navegador mobile.`
+      : processing
+        ? 'A auditoria técnica está sendo processada pelo Apify. Aguarde a conclusão para ver os resultados.'
+        : 'Apenas o protocolo HTTPS pode ser identificado pelo endereço coletado. Execute a auditoria para verificar os demais itens em um navegador real.'}</div>
+    ${completed?kv('Score técnico do site',`<span class="badge badge-blue">${esc(audit.score)} / 100</span>`):''}
     ${kv('HTTPS', verificationBadge(c.siteInfo.https))}
     ${kv('Responsividade (mobile)', verificationBadge(c.siteInfo.responsivo))}
     ${kv('Agendamento online', verificationBadge(c.siteInfo.agendamento))}
     ${kv('WhatsApp visível', verificationBadge(c.siteInfo.whatsappVisivel))}
     ${kv('Formulário de contato', verificationBadge(c.siteInfo.formularioOk))}
     ${kv('SEO técnico básico', verificationBadge(c.siteInfo.seoBasico))}
+    ${evidence.length?`<div style="margin-top:14px;"><div class="card-title" style="font-size:13.5px;">Evidências da auditoria</div>${evidence.map(item=>`<div class="evidence-item" style="padding:10px 12px;font-size:12.5px;">${esc(item.description||'')}</div>`).join('')}</div>`:''}
+    <div style="margin-top:14px;">
+      <button class="btn btn-primary" id="auditSiteBtn" ${!c.site||processing?'disabled':''}>${processing?'Auditando…':completed?'Auditar novamente':'Auditar site'}</button>
+      ${!c.site?'<span class="muted" style="font-size:12px;margin-left:10px;">Site não informado no perfil público.</span>':''}
+    </div>
     `;
   }
   if(tab==='avaliacoes'){
@@ -1513,6 +1541,49 @@ function renderDetailTab(c, tab){
   }
   return '';
 }
+async function edgeFunctionErrorMessage(error){
+  let message=(error&&error.message)||'Falha inesperada.';
+  if(error&&error.context&&typeof error.context.json==='function'){
+    try{ const details=await error.context.json(); message=details.error||details.message||message; }catch(ignore){}
+  }
+  return message;
+}
+async function runSiteAudit(){
+  const company=state.companies.find(item=>item.id===currentDiagId);
+  const button=document.getElementById('auditSiteBtn');
+  if(!company||!company.site||!button) return;
+  const force=!!(company.siteAudit&&company.siteAudit.status==='concluido');
+  button.disabled=true;
+  button.textContent='Iniciando auditoria…';
+  try{
+    const {data:startData,error:startError}=await sb.functions.invoke('audit-site',{body:{action:'start',company_id:company.id,force}});
+    if(startError) throw new Error(await edgeFunctionErrorMessage(startError));
+    if(startData&&startData.error) throw new Error(startData.error);
+    if(startData&&startData.status==='concluido'){
+      await loadAllData(state.userId);
+      toast(startData.cached?'Auditoria recente carregada.':'Auditoria do site concluída.');
+      return;
+    }
+    if(!startData||!startData.audit_id) throw new Error('A auditoria não retornou uma identificação para acompanhamento.');
+    button.textContent='Auditando site…';
+    const deadline=Date.now()+150000;
+    let result=startData;
+    while(result.status!=='concluido'){
+      if(Date.now()>deadline) throw new Error('A auditoria continua processando. Tente abrir esta empresa novamente em alguns instantes.');
+      await new Promise(resolve=>setTimeout(resolve,3000));
+      const {data:statusData,error:statusError}=await sb.functions.invoke('audit-site',{body:{action:'status',audit_id:startData.audit_id}});
+      if(statusError) throw new Error(await edgeFunctionErrorMessage(statusError));
+      if(statusData&&statusData.error) throw new Error(statusData.error);
+      result=statusData||{};
+    }
+    await loadAllData(state.userId);
+    toast('Auditoria técnica concluída e salva.');
+  }catch(error){
+    button.disabled=false;
+    button.textContent=force?'Auditar novamente':'Auditar site';
+    toast('Não foi possível auditar o site: '+((error&&error.message)||'tente novamente.'));
+  }
+}
 function bindDiagnostico(){
   document.querySelectorAll('[data-tone]').forEach(el=>{
     el.addEventListener('click', ()=> setState({diagTone: el.getAttribute('data-tone')}));
@@ -1520,6 +1591,8 @@ function bindDiagnostico(){
   document.querySelectorAll('[data-detail]').forEach(el=>{
     el.addEventListener('click', ()=> setState({detailTab: el.getAttribute('data-detail')}));
   });
+  const auditSiteBtn=document.getElementById('auditSiteBtn');
+  if(auditSiteBtn) auditSiteBtn.addEventListener('click',runSiteAudit);
   document.querySelectorAll('[data-setstatus]').forEach(el=>{
     el.addEventListener('click', async ()=>{
       const c = state.companies.find(x=>x.id===currentDiagId);

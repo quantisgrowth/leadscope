@@ -430,3 +430,9 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/search-places/deno.json"
 entrypoint = "./functions/search-places/index.ts"
+
+[functions.audit-site]
+enabled = true
+verify_jwt = true
+import_map = "./functions/audit-site/deno.json"
+entrypoint = "./functions/audit-site/index.ts"
