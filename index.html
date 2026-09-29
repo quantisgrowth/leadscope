@@ -320,6 +320,10 @@ function rowToCompany(row, evidenciaRows){
   };
 }
 
+function companyLocation(company){
+  return company.bairro || company.cidade || company.endereco || 'Não informado';
+}
+
 // Mapeamento entre os nomes usados nas telas (camelCase) e as colunas do Supabase (snake_case)
 function rowToOnboarding(row){
   if(!row) return null;
@@ -957,7 +961,7 @@ function renderOverview(){
             <div class="avatar" style="background:linear-gradient(135deg,${classificacao(c.score).color},#0b1e2e)">${initials(c.nome)}</div>
             <div style="min-width:0;">
               <div style="font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;">${c.nome}</div>
-              <div class="muted" style="font-size:12px;">${c.segmento} · ${c.bairro}</div>
+              <div class="muted" style="font-size:12px;">${c.segmento} · ${companyLocation(c)}</div>
               <div class="muted" style="font-size:12px;margin-top:2px;">${c.interpretacoes[0]}</div>
             </div>
           </div>
@@ -1176,7 +1180,7 @@ function renderOppTable(list){
           <td><input type="checkbox" class="selOpp" data-id="${c.id}" ${state.selectedOpps.includes(c.id)?'checked':''}></td>
           <td style="font-weight:600;max-width:180px;">${c.nome}</td>
           <td class="muted">${c.segmento}</td>
-          <td class="muted">${c.bairro}</td>
+          <td class="muted">${companyLocation(c)}</td>
           <td style="font-weight:800;color:${classificacao(c.score).color}">${c.score}</td>
           <td><span class="badge ${c.potencial==='alto'?'badge-blue':c.potencial==='medio'?'badge-warn':'badge-gray'}">${c.potencial==='alto'?'Alto':c.potencial==='medio'?'Médio':'Baixo'}</span></td>
           <td class="muted" style="max-width:220px;">${c.sinais[0].texto}</td>
@@ -1201,7 +1205,7 @@ function renderOppCards(list){
           <span style="font-weight:800;color:${classificacao(c.score).color};font-family:Manrope;">${c.score}</span>
         </div>
         <div style="font-weight:700;font-size:14.5px;">${c.nome}</div>
-        <div class="muted" style="font-size:12.5px;margin-bottom:10px;">${c.segmento} · ${c.bairro}</div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:10px;">${c.segmento} · ${companyLocation(c)}</div>
         <div class="muted" style="font-size:12.5px;margin-bottom:12px;">${c.sinais[0].texto}</div>
         <div class="row between">
           <span class="badge ${statusColor(c.status)}">${c.status}</span>
@@ -1257,7 +1261,7 @@ function renderDiagnostico(){
           <div class="avatar" style="width:44px;height:44px;font-size:15px;background:linear-gradient(135deg,${cls.color},#0b1e2e)">${initials(c.nome)}</div>
           <div>
             <h2 style="margin:0;font-size:19px;">${c.nome}</h2>
-            <div class="muted" style="font-size:13px;">${c.segmento} · ${c.bairro}, ${c.cidade}</div>
+            <div class="muted" style="font-size:13px;">${c.segmento} · ${companyLocation(c)}</div>
           </div>
         </div>
         <div class="pill-group" style="margin-bottom:2px;">
@@ -1484,7 +1488,7 @@ function renderMonitoradas(){
           <span style="font-weight:700;font-size:14px;">${c.nome}</span>
           <span class="badge ${statusColor(c.status)}">${c.status}</span>
         </div>
-        <div class="muted" style="font-size:12.5px;margin-bottom:12px;">${c.segmento} · ${c.bairro}</div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:12px;">${c.segmento} · ${companyLocation(c)}</div>
         <div class="badge badge-warn" style="display:flex;margin-bottom:8px;">${icon('alert')} ${alerts[idx%alerts.length]}</div>
         <div class="muted" style="font-size:11.5px;">Detectado em ${c.ultimaAtualizacao}</div>
         <div class="divider"></div>
