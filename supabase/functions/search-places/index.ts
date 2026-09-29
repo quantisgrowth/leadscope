@@ -203,7 +203,7 @@ export default {
         if (runError) throw runError;
         runId = run.id;
 
-        const apifyPayload = await apifyRequest(`acts/${APIFY_ACTOR}/runs?maxItems=${limit}&maxTotalChargeUsd=0.25`, token, {
+        const apifyPayload = await apifyRequest(`acts/${APIFY_ACTOR}/runs?maxItems=${limit}&maxTotalChargeUsd=0.50`, token, {
           method: "POST",
           body: JSON.stringify({
             searchStringsArray: [query], locationQuery: location, maxCrawledPlacesPerSearch: limit,
