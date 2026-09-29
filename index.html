@@ -240,7 +240,7 @@ const SCORES = [92,88,85,81,78,74,71,68,65,61,58,55,52,48,45,38,34,29,22,15];
 const STATUSES = ['Nova','Nova','Em análise','Priorizada','Nova','Abordagem preparada','Contatada','Nova','Respondeu','Priorizada','Em análise','Nova','Reunião agendada','Nova','Contatada','Descartada','Nova','Cliente','Nova','Em análise'];
 
 const SIGNAL_POOL = [
-  {key:'semSite', texto:'Site não encontrado no Perfil da Empresa no Google', fonte:'Google Places', interpretacao:'Pode indicar uma oportunidade clara de criação ou estruturação da presença digital', servico:3},
+  {key:'semSite', texto:'Site não encontrado na fonte pública consultada', fonte:'Base pública de estabelecimentos', interpretacao:'Pode indicar uma oportunidade clara de criação ou estruturação da presença digital', servico:3},
   {key:'agendamento', texto:'Site não possui sistema de agendamento online visível', fonte:'Site institucional', interpretacao:'Pode indicar dificuldade na jornada de agendamento e possível perda de contatos interessados', servico:0},
   {key:'formulario', texto:'Formulário de contato apresentou erro ao ser testado', fonte:'Site institucional', interpretacao:'Pode indicar perda de leads que tentam iniciar contato pelo site', servico:1},
   {key:'perfilIncompleto', texto:'Perfil comercial possui informações incompletas (horário ou categoria)', fonte:'Perfil comercial', interpretacao:'Pode indicar presença digital sem manutenção recorrente', servico:4},
@@ -272,7 +272,8 @@ function sinaisFromKeys(keys){ return (keys||[]).map(k=>SIGNAL_POOL.find(s=>s.ke
 // Converte uma linha da tabela `empresas` (+ suas `evidencias`) no formato que as telas usam.
 function rowToCompany(row, evidenciaRows){
   const sinais = sinaisFromKeys(row.sinais_keys);
-  if(!sinais.length) sinais.push({key:'perfilGoogle', texto:'Perfil público localizado e validado no Google', fonte:'Google Places', interpretacao:'Há dados públicos suficientes para iniciar uma qualificação comercial', servico:4});
+  const sourceLabel=row.source_provider==='google_maps'?'Google Maps via Apify':'Fonte pública';
+  if(!sinais.length) sinais.push({key:'perfilPublico', texto:'Estabelecimento localizado em uma fonte pública', fonte:sourceLabel, interpretacao:'Há dados públicos suficientes para iniciar uma qualificação comercial', servico:4});
   const evidencias = (evidenciaRows||[]).map(e=>({
     texto:e.texto, fonte:e.fonte,
     data: e.data ? fmtDate(new Date(e.data+'T00:00:00')) : '',
@@ -851,7 +852,7 @@ function renderOnboarding(){
       <div class="field"><label class="label">Palavras-chave complementares (opcional)</label><input class="input" id="f_palavras" value="${esc(ob.palavrasChave)}" placeholder="Ex: implante, ortodontia"></div>
       <div class="field"><label class="label">Quantidade inicial</label><select class="input" id="f_qtd">${[5,10,15,20].map(n=>`<option value="${n}" ${String(ob.qtdOportunidades)===String(n)?'selected':''}>${n} empresas</option>`).join('')}</select></div>`;
   } else {
-    inner = `<div class="badge badge-blue" style="display:block;padding:12px;margin-bottom:18px;">Tudo pronto para criar seu primeiro radar com dados públicos do Google.</div>
+    inner = `<div class="badge badge-blue" style="display:block;padding:12px;margin-bottom:18px;">Tudo pronto para criar seu primeiro radar com dados públicos de estabelecimentos.</div>
       ${kv('Sua empresa', ob.empresa)}${kv('Oferta', ob.servico)}${kv('Resultado entregue', ob.problema)}
       ${kv('Empresas buscadas', ob.segmentosDesejados)}${kv('Localização', ob.regiao)}${kv('Quantidade', ob.qtdOportunidades+' empresas')}
       <p class="muted" style="font-size:12px;margin-top:16px;">Os pesos avançados do score continuam disponíveis em Configurações.</p>`;
@@ -991,7 +992,7 @@ function renderRadar(){
   <div class="grid" style="grid-template-columns:1.3fr .9fr;align-items:start;">
     <div class="card">
       <div class="card-title">Novo radar</div>
-      <p class="card-sub">Busca empresas reais no Google e registra apenas dados públicos verificáveis.</p>
+      <p class="card-sub">Busca empresas reais em fontes públicas e registra dados verificáveis.</p>
       <div class="field"><label class="label">Nome do radar</label><input class="input" id="rNome" placeholder="Ex: Clínicas odontológicas — Sorocaba" value="${esc(segmento+(ob.regiao?' — '+ob.regiao:''))}"></div>
       <div class="grid" style="grid-template-columns:1fr 1fr;">
         <div class="field"><label class="label">Segmento ou tipo de empresa</label><input class="input" id="rSegmento" value="${esc(segmento)}" placeholder="Ex: Clínica odontológica"></div>
@@ -1058,18 +1059,36 @@ function bindRadarProcessing(){
       const query=[segmento,palavras].filter(Boolean).join(' ');
       const { data:radar, error:radarError }=await sb.from('radares').insert({
         user_id:state.userId,nome,segmento,cidade:localizacao,query,localizacao,raio_metros:raio,
-        limite_resultados:limite,status:'pendente',fonte:'google_places'
+        limite_resultados:limite,status:'pendente',fonte:'apify_google_maps'
       }).select().single();
       if(radarError) throw radarError;
-      const { data, error }=await sb.functions.invoke('search-google-places',{body:{radar_id:radar.id,query,location:localizacao,result_limit:limite}});
-      if(error){
-        let message=error.message;
-        if(error.context&&typeof error.context.json==='function'){
-          try{ const details=await error.context.json(); message=details.error||details.message||message; }catch(ignore){}
+      const { data:startData, error:startError }=await sb.functions.invoke('search-places',{body:{action:'start',radar_id:radar.id,query,location:localizacao,result_limit:limite}});
+      if(startError){
+        let message=startError.message;
+        if(startError.context&&typeof startError.context.json==='function'){
+          try{ const details=await startError.context.json(); message=details.error||details.message||message; }catch(ignore){}
         }
         throw new Error(message);
       }
-      if(data&&data.error) throw new Error(data.error);
+      if(startData&&startData.error) throw new Error(startData.error);
+      if(!startData||!startData.run_id) throw new Error('A coleta não retornou uma identificação para acompanhamento.');
+
+      let data=startData;
+      const deadline=Date.now()+180000;
+      while(data.status!=='concluido'){
+        if(Date.now()>deadline) throw new Error('A coleta continua processando. Consulte este radar novamente em alguns instantes.');
+        await new Promise(resolve=>setTimeout(resolve,3000));
+        const { data:statusData, error:statusError }=await sb.functions.invoke('search-places',{body:{action:'status',run_id:startData.run_id}});
+        if(statusError){
+          let message=statusError.message;
+          if(statusError.context&&typeof statusError.context.json==='function'){
+            try{ const details=await statusError.context.json(); message=details.error||details.message||message; }catch(ignore){}
+          }
+          throw new Error(message);
+        }
+        if(statusData&&statusData.error) throw new Error(statusData.error);
+        data=statusData||{};
+      }
       clearInterval(timer); wrap.innerHTML='';
       await loadAllData(state.userId);
       toast('Radar concluído: '+Number((data&&data.found)||0)+' empresas encontradas.');
@@ -1604,7 +1623,7 @@ function renderConfiguracoes(){
       <div class="field"><label class="label">Região</label><input class="input" data-cfg="onboarding.regiao" value="${esc(ob.regiao)}"></div>
       <div class="field"><label class="label">Palavras-chave</label><input class="input" data-cfg="onboarding.palavrasChave" value="${esc(ob.palavrasChave)}"></div>`;
   } else if(tab==='score'){
-    const criterios = [['google','Qualidade do perfil no Google'],['site','Qualidade do site'],['reputacao','Reputação e avaliações'],['contato','Facilidade de contato'],['presenca','Presença digital'],['compatibilidade','Compatibilidade com a oferta'],['urgencia','Sinais de urgência']];
+    const criterios = [['google','Qualidade do perfil público'],['site','Qualidade do site'],['reputacao','Reputação e avaliações'],['contato','Facilidade de contato'],['presenca','Presença digital'],['compatibilidade','Compatibilidade com a oferta'],['urgencia','Sinais de urgência']];
     inner = `<div class="badge badge-blue" style="display:block;padding:10px 12px;margin-bottom:16px;">${icon('zap')} O LeadScope Score é totalmente configurável e explicável — cada peso influencia diretamente o cálculo.</div>` +
       criterios.map(([k,label])=>`
       <div class="field">
@@ -1620,10 +1639,10 @@ function renderConfiguracoes(){
       </tbody></table></div>`;
   } else if(tab==='integracoes'){
     inner = `
-      ${[['Google Business Profile','Preparado para integração futura com API autorizada'],['Instagram / Meta','Preparado para integração futura'],['Supabase','Banco de dados para autenticação e persistência multiempresa'],['CRM externo','Exportação de oportunidades priorizadas']].map(([n,d])=>`
+      ${[['Apify / Google Maps','Fonte principal do radar de estabelecimentos',true],['Google Places API oficial','Integração opcional para uma etapa futura',false],['Instagram / Meta','Preparado para integração futura',false],['Supabase','Banco de dados para autenticação e persistência multiempresa',true],['CRM externo','Exportação de oportunidades priorizadas',false]].map(([n,d,connected])=>`
       <div class="row between" style="padding:12px 0;border-top:1px solid var(--border);">
         <div><div style="font-weight:600;font-size:13.5px;">${n}</div><div class="muted" style="font-size:12px;">${d}</div></div>
-        <span class="badge badge-gray">Não conectado</span>
+        <span class="badge ${connected?'badge-blue':'badge-gray'}">${connected?'Conectado':'Não conectado'}</span>
       </div>`).join('')}`;
   } else if(tab==='plano'){
     inner = `
