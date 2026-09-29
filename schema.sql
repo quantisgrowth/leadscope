@@ -122,9 +122,8 @@ create policy "evidencias_self" on public.evidencias
   with check (exists (select 1 from public.empresas e where e.id = empresa_id and e.user_id = auth.uid()));
 
 -- ============================================================
--- AUTO-SEED: quando alguém cria uma conta, já nasce com o
--- perfil, as configurações padrão e as 20 empresas de demonstração
--- (mesmos dados do protótipo — nenhum dado real é raspado).
+-- BOOTSTRAP: novas contas recebem somente perfil e configurações.
+-- Empresas e radares devem vir exclusivamente de coletas reais.
 -- ============================================================
 create or replace function public.handle_new_leadscope_user()
 returns trigger as $$
@@ -156,6 +155,7 @@ begin
 
   insert into public.account_settings (user_id) values (new.id);
 
+  /* Seed demonstrativo legado desativado.
   -- radar padrão de demonstração
   v_radar_id := gen_random_uuid();
   INSERT INTO public.radares (id, user_id, nome, segmento, cidade, criado_em)
@@ -352,6 +352,8 @@ begin
   INSERT INTO public.evidencias (empresa_id, texto, fonte, data, confianca) VALUES (v_emp20, 'Canal de WhatsApp não está visível no site', 'Site institucional', '2026-08-03', 'Baixa');
   INSERT INTO public.evidencias (empresa_id, texto, fonte, data, confianca) VALUES (v_emp20, 'Última publicação em redes sociais ocorreu há vários meses', 'Redes sociais', '2026-07-30', 'Baixa');
 
+
+  */
 
   return new;
 end;
