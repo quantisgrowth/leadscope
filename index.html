@@ -123,6 +123,18 @@ tr.row-hover:hover{background:rgba(255,255,255,.015);}
 .pill-group{display:flex;gap:6px;flex-wrap:wrap;}
 .pill{padding:6px 12px;border-radius:999px;border:1px solid var(--border);font-size:12.5px;cursor:pointer;color:var(--text-secondary);background:transparent;}
 .pill.active{background:rgba(52,120,246,.14);border-color:var(--blue);color:var(--blue-light);}
+.category-picker{position:relative;min-height:42px;background:#08131c;border:1px solid var(--border);border-radius:8px;padding:6px 8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.category-picker:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(52,120,246,.18);}
+#rCategoryChips{display:contents;}
+.category-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;background:rgba(52,120,246,.14);border:1px solid rgba(52,120,246,.35);color:var(--blue-light);font-size:12px;font-weight:600;}
+.category-chip button{border:0;background:transparent;color:inherit;padding:0;cursor:pointer;font-size:16px;line-height:1;}
+.category-input{flex:1;min-width:180px;background:transparent;border:0;outline:0;color:var(--text);font:inherit;font-size:14px;padding:4px;}
+.category-suggestions{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:90;background:#0a1a26;border:1px solid var(--border);border-radius:8px;box-shadow:0 16px 36px rgba(0,0,0,.45);max-height:230px;overflow:auto;display:none;}
+.category-suggestions.show{display:block;}
+.category-option{padding:10px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid rgba(29,51,68,.65);}
+.category-option:last-child{border-bottom:0;}
+.category-option:hover,.category-option.active{background:rgba(52,120,246,.12);color:var(--blue-light);}
+.verification-note{border:1px solid var(--border);background:rgba(52,120,246,.06);border-radius:9px;padding:11px 12px;color:var(--text-secondary);font-size:12.5px;line-height:1.5;margin-bottom:14px;}
 
 /* ---------- app shell ---------- */
 .app-shell{display:flex;min-height:100vh;}
@@ -232,13 +244,6 @@ let passwordRecoveryPending = recoveryHash.get('type') === 'recovery' || recover
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* ================= DATA MODEL ================= */
-const CITY = "Sorocaba, SP";
-const NOMES = ['Clínica Sorriso Sorocaba','OdontoVida Sorocaba','Dental Excellence','Clínica Bem Estar Odonto','Sorocaba Odonto Center','Espaço Dental Premium','OdontoMais','Clínica Dr. Ricardo Fontes','Sorriso Perfeito Odontologia','Vitalle Odonto','Clínica Odontológica Santa Fé','OdontoPrime','Dental Care Sorocaba','Clínica Odonto União','Espaço Sorriso Odontologia','OdontoLife','Clínica Dental Nova Aliança','Sorriso & Saúde Odontologia','OdontoBem','Clínica Odontológica Nova Era'];
-const BAIRROS = ['Campolim','Jardim Vergueiro','Éden','Vila Hortência','Centro','Jardim Simus','Vila Barão','Jardim Santa Rosália','Zona Norte','Parque Campolim','Jardim Maria Eugênia','Vila Fiori','Jardim América','Alto da Boa Vista','Jardim Faculdade','Vila Haro','Jardim Pagliato','Vila Trujillo','Jardim Represa','Vossoroca'];
-const RUAS = ['das Flores','Barão de Suruí','Fernando Prestes','Fabrício Vampré','Doutor Salles','Padre Antônio Vieira','Riachuelo','Ipanema','Coronel Aureliano','Doutor Aureliano Barbosa'];
-const SCORES = [92,88,85,81,78,74,71,68,65,61,58,55,52,48,45,38,34,29,22,15];
-const STATUSES = ['Nova','Nova','Em análise','Priorizada','Nova','Abordagem preparada','Contatada','Nova','Respondeu','Priorizada','Em análise','Nova','Reunião agendada','Nova','Contatada','Descartada','Nova','Cliente','Nova','Em análise'];
-
 const SIGNAL_POOL = [
   {key:'semSite', texto:'Site não encontrado na fonte pública consultada', fonte:'Base pública de estabelecimentos', interpretacao:'Pode indicar uma oportunidade clara de criação ou estruturação da presença digital', servico:3},
   {key:'agendamento', texto:'Site não possui sistema de agendamento online visível', fonte:'Site institucional', interpretacao:'Pode indicar dificuldade na jornada de agendamento e possível perda de contatos interessados', servico:0},
@@ -257,13 +262,32 @@ const SERVICOS = [
   'Redesign do site com foco em dispositivos móveis',
   'Plano de conteúdo e presença em redes sociais',
 ];
+const CURATED_BUSINESS_CATEGORIES = [
+  'Academia','Advogado','Agência de marketing','Arquiteto','Autoescola','Clínica de estética',
+  'Clínica médica','Clínica odontológica','Construtora','Contabilidade','Corretora de imóveis',
+  'Empresa de construção civil','Empresa de instalação elétrica','Empresa de limpeza','Empresa de mudanças',
+  'Empresa de paisagismo','Empresa de segurança','Empresa de Terraplenagem','Escola','Escritório de advocacia',
+  'Farmácia','Fornecedor de equipamentos industriais','Hotel','Imobiliária','Loja de materiais de construção',
+  'Oficina mecânica','Restaurante','Salão de beleza','Serviço de entrega','Serviço de guindastes',
+  'Serviço de logística','Serviço de manutenção','Serviço de transporte','Transportadora'
+];
+let radarCategories = null;
 
-function numSignalsFor(score){ if(score>=80) return 2; if(score>=60) return 3; if(score>=40) return 4; return 5; }
 function classificacao(score){ if(score>=80) return {label:'Alto potencial', color:'var(--blue)'}; if(score>=60) return {label:'Potencial relevante', color:'var(--blue-light)'}; if(score>=40) return {label:'Acompanhar', color:'var(--warn)'}; return {label:'Baixa prioridade', color:'var(--text-secondary)'}; }
 function potencialBand(score){ return score>=70?'alto':score>=40?'medio':'baixo'; }
 function fmtDate(d){ return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'}); }
-function daysAgo(n){ const d=new Date(); d.setDate(d.getDate()-n); return d; }
-function slug(s){ return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'').slice(0,16); }
+function normalizeText(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
+
+function formatOpeningHours(sourcePayload){
+  const rows=sourcePayload&&Array.isArray(sourcePayload.openingHours) ? sourcePayload.openingHours : [];
+  if(!rows.length) return 'Não informado';
+  const dayNames={monday:'Seg',tuesday:'Ter',wednesday:'Qua',thursday:'Qui',friday:'Sex',saturday:'Sáb',sunday:'Domingo'};
+  return rows.map(item=>{
+    const day=dayNames[normalizeText(item&&item.day)] || String((item&&item.day)||'').slice(0,3);
+    const hours=String((item&&item.hours)||'Não informado').replace(/\s+to\s+/gi,' às ').replace(/^closed$/i,'Fechado');
+    return `${day}: ${hours}`;
+  }).join(' · ');
+}
 
 // Reconstrói os sinais completos (texto, fonte, interpretação, serviço) a partir
 // das chaves salvas no banco (empresas.sinais_keys), evitando duplicar esses textos no schema SQL.
@@ -279,9 +303,12 @@ function rowToCompany(row, evidenciaRows){
     data: e.data ? fmtDate(new Date(e.data+'T00:00:00')) : '',
     confianca:e.confianca,
   }));
+  const sourcePayload=row.source_payload&&typeof row.source_payload==='object' ? row.source_payload : {};
+  const collectedCategories=Array.isArray(sourcePayload.categories) ? sourcePayload.categories.filter(Boolean) : [];
   return {
     id:row.id, nome:row.nome, segmento:row.segmento, cidade:row.cidade, bairro:row.bairro, endereco:row.endereco,
     telefone:row.telefone, site:row.site, redes:row.redes||[], nota:row.nota, avaliacoes:row.avaliacoes,
+    categorias:[...new Set([row.segmento,...collectedCategories].filter(Boolean))], sourcePayload,
     score:row.score, confianca:row.confianca, potencial:row.potencial,
     sinais, evidencias,
     interpretacoes:[...new Set(sinais.map(s=>s.interpretacao))].slice(0,3),
@@ -292,30 +319,21 @@ function rowToCompany(row, evidenciaRows){
     monitorada: !!row.monitorada,
     mensagemGerada: row.mensagem_gerada, mensagemTom: row.mensagem_tom || 'consultivo', mensagemUtilizada: !!row.mensagem_utilizada,
     perfil:{
-      categoria:row.segmento || 'Não informada', horarios:'Seg a sex, 8h às 19h',
-      respondeuAvaliacoes: !sinais.some(s=>s.key==='semResposta'),
-      completude: sinais.some(s=>s.key==='perfilIncompleto') ? 62 : 94,
+      categoria:row.segmento || 'Não informada', horarios:formatOpeningHours(sourcePayload),
+      respondeuAvaliacoes:null, completude:null,
     },
     siteInfo:{
-      https:true, responsivo: !sinais.some(s=>s.key==='mobileRuim'),
-      agendamento: !sinais.some(s=>s.key==='agendamento'),
-      whatsappVisivel: !sinais.some(s=>s.key==='semWhats'),
-      formularioOk: !sinais.some(s=>s.key==='formulario'),
-      seoBasico: row.score>=55,
+      https: row.site ? /^https:\/\//i.test(row.site) : null,
+      responsivo:null, agendamento:null, whatsappVisivel:null, formularioOk:null, seoBasico:null,
     },
     avaliacoesInfo:{
-      sentimento: sinais.some(s=>s.key==='avaliacaoDemora') ? 'Misto' : 'Predominantemente positivo',
-      temas: sinais.some(s=>s.key==='avaliacaoDemora') ? ['Tempo de espera','Atendimento','Preço'] : ['Atendimento','Qualidade','Ambiente'],
+      sentimento:null, temas:[],
     },
     jornada:{
-      etapas: sinais.some(s=>s.key==='agendamento') ? 4 : 2,
-      whatsapp: !sinais.some(s=>s.key==='semWhats'),
-      formulario: !sinais.some(s=>s.key==='formulario'),
-      agendamentoOnline: !sinais.some(s=>s.key==='agendamento'),
+      etapas:null, whatsapp:null, formulario:null, agendamentoOnline:null,
     },
     presenca:{
-      redesEncontradas: sinais.some(s=>s.key==='semPublicacao') ? ['Facebook'] : ['Instagram','Facebook'],
-      frequencia: sinais.some(s=>s.key==='semPublicacao') ? 'Baixa (sem publicações recentes)' : 'Regular',
+      redesEncontradas:row.redes||[], frequencia:null,
     },
   };
 }
@@ -999,9 +1017,74 @@ function renderOverview(){
 }
 
 /* ================= RADAR ================= */
+function categoryCatalog(){
+  const collected=state.companies.flatMap(company=>company.categorias||[company.segmento]);
+  const unique=new Map();
+  [...CURATED_BUSINESS_CATEGORIES,...collected].filter(Boolean).forEach(category=>{
+    const key=normalizeText(category);
+    if(key&&!unique.has(key)) unique.set(key,String(category).trim());
+  });
+  return [...unique.values()].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+}
+function radarCategoryMatches(term){
+  const query=normalizeText(term);
+  const selected=new Set((radarCategories||[]).map(normalizeText));
+  return categoryCatalog().filter(category=>!selected.has(normalizeText(category))&&(!query||normalizeText(category).includes(query))).slice(0,8);
+}
+function paintRadarCategoryPicker(){
+  const chips=document.getElementById('rCategoryChips');
+  if(chips) chips.innerHTML=(radarCategories||[]).map((category,index)=>`<span class="category-chip">${esc(category)}<button type="button" data-remove-category="${index}" aria-label="Remover ${esc(category)}">×</button></span>`).join('');
+  paintRadarCategorySuggestions();
+}
+function paintRadarCategorySuggestions(){
+  const input=document.getElementById('rCategoryInput');
+  const list=document.getElementById('rCategorySuggestions');
+  if(!input||!list) return;
+  const matches=radarCategoryMatches(input.value);
+  list.innerHTML=matches.map((category,index)=>`<div class="category-option ${index===0?'active':''}" data-category="${esc(category)}">${esc(category)}</div>`).join('');
+  list.classList.toggle('show',document.activeElement===input&&matches.length>0);
+}
+function addRadarCategory(value){
+  const category=String(value||'').trim();
+  if(!category) return false;
+  if((radarCategories||[]).some(item=>normalizeText(item)===normalizeText(category))) return true;
+  if((radarCategories||[]).length>=5){ toast('Você pode pesquisar até 5 categorias por radar.'); return false; }
+  radarCategories.push(category);
+  const input=document.getElementById('rCategoryInput');
+  if(input) input.value='';
+  paintRadarCategoryPicker();
+  return true;
+}
+function bindRadarCategoryPicker(){
+  const picker=document.getElementById('rCategoryPicker');
+  const input=document.getElementById('rCategoryInput');
+  if(!picker||!input) return;
+  paintRadarCategoryPicker();
+  input.addEventListener('focus',paintRadarCategorySuggestions);
+  input.addEventListener('input',paintRadarCategorySuggestions);
+  input.addEventListener('keydown',event=>{
+    if(event.key==='Enter'){
+      event.preventDefault();
+      const first=radarCategoryMatches(input.value)[0];
+      addRadarCategory(first||input.value);
+    }else if(event.key==='Backspace'&&!input.value&&radarCategories.length){
+      radarCategories.pop(); paintRadarCategoryPicker();
+    }else if(event.key==='Escape'){
+      document.getElementById('rCategorySuggestions').classList.remove('show');
+    }
+  });
+  picker.addEventListener('click',event=>{
+    const option=event.target.closest('[data-category]');
+    const remove=event.target.closest('[data-remove-category]');
+    if(option) addRadarCategory(option.getAttribute('data-category'));
+    if(remove){ radarCategories.splice(Number(remove.getAttribute('data-remove-category')),1); paintRadarCategoryPicker(); }
+    if(!remove) input.focus();
+  });
+}
 function renderRadar(){
   const ob=state.onboarding;
   const segmento=(ob.segmentosDesejados||'').split(',')[0].trim();
+  if(radarCategories===null) radarCategories=segmento?[segmento]:[];
   return `
   <h1 class="page-title">Radar</h1>
   <p class="page-sub">Configure uma nova busca para encontrar empresas com necessidades comerciais verificáveis.</p>
@@ -1011,7 +1094,7 @@ function renderRadar(){
       <p class="card-sub">Busca empresas reais em fontes públicas e registra dados verificáveis.</p>
       <div class="field"><label class="label">Nome do radar</label><input class="input" id="rNome" placeholder="Ex: Clínicas odontológicas — Sorocaba" value="${esc(segmento+(ob.regiao?' — '+ob.regiao:''))}"></div>
       <div class="grid" style="grid-template-columns:1fr 1fr;">
-        <div class="field"><label class="label">Segmento ou tipo de empresa</label><input class="input" id="rSegmento" value="${esc(segmento)}" placeholder="Ex: Clínica odontológica"></div>
+        <div class="field"><label class="label">Categorias de empresa <span class="muted">(até 5)</span></label><div class="category-picker" id="rCategoryPicker"><span id="rCategoryChips"></span><input class="category-input" id="rCategoryInput" autocomplete="off" placeholder="Digite e pressione Enter"><div class="category-suggestions" id="rCategorySuggestions"></div></div><div class="muted" style="font-size:11.5px;margin-top:6px;">Selecione uma sugestão ou pressione Enter para adicionar outra categoria.</div></div>
         <div class="field"><label class="label">Serviço que será oferecido</label><input class="input" id="rServico" value="${esc(ob.servico)}" readonly></div>
       </div>
       <div class="grid" style="grid-template-columns:1fr 1fr;">
@@ -1041,17 +1124,21 @@ function renderRadar(){
   <div id="processingModalWrap"></div>`;
 }
 function bindRadarProcessing(){
+  bindRadarCategoryPicker();
   const btn = document.getElementById('runRadar');
   if(!btn) return;
   btn.addEventListener('click', async ()=>{
     const nome=document.getElementById('rNome').value.trim();
-    const segmento=document.getElementById('rSegmento').value.trim();
+    const categoryInput=document.getElementById('rCategoryInput');
+    if(categoryInput&&categoryInput.value.trim()) addRadarCategory(categoryInput.value);
+    const categories=(radarCategories||[]).slice();
+    const segmento=categories.join(', ');
     const localizacao=document.getElementById('rLocalizacao').value.trim();
     const palavras=document.getElementById('rPalavras').value.trim();
     const limite=Number(document.getElementById('rQuantidade').value)||20;
     const raio=Number(document.getElementById('rRaio').value)||15000;
-    if(!nome||!segmento||!localizacao){ toast('Informe o nome, o segmento e a localização do radar.'); return; }
-    const steps = ['Localizando empresas','Verificando presença digital','Analisando site e avaliações','Calculando potencial comercial','Preparando recomendações'];
+    if(!nome||!categories.length||!localizacao){ toast('Informe o nome, ao menos uma categoria e a localização do radar.'); return; }
+    const steps = ['Localizando empresas','Coletando perfis públicos','Organizando dados encontrados','Calculando potencial comercial','Preparando recomendações'];
     const wrap = document.getElementById('processingModalWrap');
     let i=0, timer;
     function paint(){
@@ -1072,13 +1159,14 @@ function bindRadarProcessing(){
     paint();
     timer=setInterval(()=>{ i=Math.min(i+1,steps.length-1); paint(); },900);
     try{
-      const query=[segmento,palavras].filter(Boolean).join(' ');
+      const queries=categories.map(category=>[category,palavras].filter(Boolean).join(' '));
+      const query=queries.join(' | ');
       const { data:radar, error:radarError }=await sb.from('radares').insert({
         user_id:state.userId,nome,segmento,cidade:localizacao,query,localizacao,raio_metros:raio,
         limite_resultados:limite,status:'pendente',fonte:'apify_google_maps'
       }).select().single();
       if(radarError) throw radarError;
-      const { data:startData, error:startError }=await sb.functions.invoke('search-places',{body:{action:'start',radar_id:radar.id,query,location:localizacao,result_limit:limite}});
+      const { data:startData, error:startError }=await sb.functions.invoke('search-places',{body:{action:'start',radar_id:radar.id,query:queries[0],queries,location:localizacao,result_limit:limite}});
       if(startError){
         let message=startError.message;
         if(startError.context&&typeof startError.context.json==='function'){
@@ -1107,6 +1195,7 @@ function bindRadarProcessing(){
       }
       clearInterval(timer); wrap.innerHTML='';
       await loadAllData(state.userId);
+      radarCategories=null;
       toast('Radar concluído: '+Number((data&&data.found)||0)+' empresas encontradas.');
       navigate('#/oportunidades');
     }catch(e){
@@ -1364,54 +1453,62 @@ function renderDiagnostico(){
   `;
 }
 function kv(label,val){ return `<div class="row between" style="padding:9px 0;border-top:1px solid var(--border);font-size:13.5px;"><span class="muted">${label}</span><span style="font-weight:600;text-align:right;">${val}</span></div>`; }
-function boolBadge(v){ return v ? `<span class="badge badge-blue">${icon('check')} Sim</span>` : `<span class="badge badge-warn">${icon('alert')} Não</span>`; }
+function verificationBadge(v){
+  if(v===true) return `<span class="badge badge-blue">${icon('check')} Sim</span>`;
+  if(v===false) return `<span class="badge badge-warn">${icon('alert')} Não</span>`;
+  return `<span class="badge badge-gray">Não verificado</span>`;
+}
 function renderDetailTab(c, tab){
   if(tab==='perfil'){
+    const extraCategories=(c.categorias||[]).filter(category=>normalizeText(category)!==normalizeText(c.perfil.categoria));
     return `
-    ${kv('Categoria', c.perfil.categoria)}
-    ${kv('Endereço', c.endereco)}
-    ${kv('Telefone', c.telefone)}
-    ${kv('Horários', c.perfil.horarios)}
+    ${kv('Categoria', esc(c.perfil.categoria||'Não informada'))}
+    ${extraCategories.length?kv('Categorias adicionais',extraCategories.map(esc).join(', ')):''}
+    ${kv('Endereço', esc(c.endereco||'Não informado'))}
+    ${kv('Telefone', esc(c.telefone||'Não informado'))}
+    ${kv('Horários', esc(c.perfil.horarios||'Não informado'))}
     ${kv('Site', externalSiteLink(c.site))}
-    ${kv('Nota', c.nota+' / 5.0')}
-    ${kv('Número de avaliações', c.avaliacoes)}
-    ${kv('Percentual de avaliações respondidas', c.perfil.respondeuAvaliacoes ? '≈ 80%' : '≈ 10%')}
-    ${kv('Completude estimada do perfil', c.perfil.completude+'%')}
+    ${kv('Nota', c.nota!=null?esc(c.nota+' / 5.0'):'Não informado')}
+    ${kv('Número de avaliações', c.avaliacoes!=null?esc(c.avaliacoes):'Não informado')}
+    ${kv('Percentual de avaliações respondidas', verificationBadge(c.perfil.respondeuAvaliacoes))}
+    ${kv('Completude estimada do perfil', verificationBadge(c.perfil.completude))}
     `;
   }
   if(tab==='site'){
     return `
-    ${kv('HTTPS', boolBadge(c.siteInfo.https))}
-    ${kv('Responsividade (mobile)', boolBadge(c.siteInfo.responsivo))}
-    ${kv('Agendamento online', boolBadge(c.siteInfo.agendamento))}
-    ${kv('WhatsApp visível', boolBadge(c.siteInfo.whatsappVisivel))}
-    ${kv('Formulário de contato', boolBadge(c.siteInfo.formularioOk))}
-    ${kv('SEO técnico básico', boolBadge(c.siteInfo.seoBasico))}
+    <div class="verification-note">Apenas o protocolo HTTPS pode ser identificado pelo endereço coletado. Os demais itens exigem uma auditoria técnica do site e, enquanto ela não for executada, não são apresentados como fatos nem influenciam o diagnóstico.</div>
+    ${kv('HTTPS', verificationBadge(c.siteInfo.https))}
+    ${kv('Responsividade (mobile)', verificationBadge(c.siteInfo.responsivo))}
+    ${kv('Agendamento online', verificationBadge(c.siteInfo.agendamento))}
+    ${kv('WhatsApp visível', verificationBadge(c.siteInfo.whatsappVisivel))}
+    ${kv('Formulário de contato', verificationBadge(c.siteInfo.formularioOk))}
+    ${kv('SEO técnico básico', verificationBadge(c.siteInfo.seoBasico))}
     `;
   }
   if(tab==='avaliacoes'){
     return `
-    ${kv('Nota média', c.nota)}
-    ${kv('Volume', c.avaliacoes)}
-    ${kv('Sentimento predominante', c.avaliacoesInfo.sentimento)}
-    ${kv('Temas recorrentes', c.avaliacoesInfo.temas.join(', '))}
+    ${kv('Nota média', c.nota!=null?esc(c.nota):'Não informado')}
+    ${kv('Volume', c.avaliacoes!=null?esc(c.avaliacoes):'Não informado')}
+    ${kv('Sentimento predominante', verificationBadge(c.avaliacoesInfo.sentimento))}
+    ${kv('Temas recorrentes', c.avaliacoesInfo.temas.length?c.avaliacoesInfo.temas.map(esc).join(', '):verificationBadge(null))}
     <div class="divider"></div>
     <div class="badge badge-warn" style="display:block;padding:10px 12px;line-height:1.5;">${icon('alert')} As avaliações são sinais públicos e não comprovam, isoladamente, a qualidade operacional da empresa.</div>
     `;
   }
   if(tab==='jornada'){
     return `
-    ${kv('Etapas até o contato', c.jornada.etapas)}
-    ${kv('WhatsApp disponível', boolBadge(c.jornada.whatsapp))}
-    ${kv('Formulário disponível', boolBadge(c.jornada.formulario))}
-    ${kv('Agendamento online disponível', boolBadge(c.jornada.agendamentoOnline))}
+    <div class="verification-note">Esta jornada depende da futura auditoria do site. Nenhuma etapa é estimada sem uma verificação real.</div>
+    ${kv('Etapas até o contato', c.jornada.etapas==null?verificationBadge(null):esc(c.jornada.etapas))}
+    ${kv('WhatsApp disponível', verificationBadge(c.jornada.whatsapp))}
+    ${kv('Formulário disponível', verificationBadge(c.jornada.formulario))}
+    ${kv('Agendamento online disponível', verificationBadge(c.jornada.agendamentoOnline))}
     `;
   }
   if(tab==='presenca'){
     return `
-    ${kv('Redes encontradas', c.presenca.redesEncontradas.join(', '))}
-    ${kv('Frequência aparente de publicações', c.presenca.frequencia)}
-    ${kv('Consistência das informações', 'Alta')}
+    ${kv('Redes encontradas', c.presenca.redesEncontradas.length?c.presenca.redesEncontradas.map(esc).join(', '):'Não informado')}
+    ${kv('Frequência aparente de publicações', c.presenca.frequencia?esc(c.presenca.frequencia):verificationBadge(null))}
+    ${kv('Consistência das informações', verificationBadge(null))}
     `;
   }
   return '';

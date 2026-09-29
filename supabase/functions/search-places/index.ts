@@ -189,7 +189,11 @@ export default {
 
       if (action === "start") {
         radarId = cleanText(body.radar_id, 64);
-        const query = cleanText(body.query);
+        const requestedQueries = Array.isArray(body.queries)
+          ? body.queries.map((item: unknown) => cleanText(item)).filter(Boolean).slice(0, 5)
+          : [];
+        const query = cleanText(body.query || requestedQueries[0]);
+        const queries = requestedQueries.length ? requestedQueries : [query];
         const location = cleanText(body.location);
         const limit = Math.max(1, Math.min(20, Number(body.result_limit) || 20));
         if (!radarId || !query || !location) return Response.json({ error: "Radar, segmento e localização são obrigatórios." }, { status: 400 });
@@ -206,7 +210,7 @@ export default {
         const apifyPayload = await apifyRequest(`acts/${APIFY_ACTOR}/runs?maxItems=${limit}&maxTotalChargeUsd=0.50`, token, {
           method: "POST",
           body: JSON.stringify({
-            searchStringsArray: [query], locationQuery: location, maxCrawledPlacesPerSearch: limit,
+            searchStringsArray: queries, locationQuery: location, maxCrawledPlacesPerSearch: limit,
             language: "pt-BR", skipClosedPlaces: true, scrapePlaceDetailPage: true,
             maxReviews: 0, maxImages: 0, scrapeContacts: true,
             scrapeSocialMediaProfiles: {
@@ -221,7 +225,7 @@ export default {
 
         await ctx.supabase.from("radar_runs").update({
           provider_run_id: providerRun.id, provider_dataset_id: providerRun.defaultDatasetId ?? null,
-          provider_status: providerRun.status ?? "RUNNING", provider_payload: { actor: APIFY_ACTOR },
+          provider_status: providerRun.status ?? "RUNNING", provider_payload: { actor: APIFY_ACTOR, queries },
         }).eq("id", runId);
         await ctx.supabase.from("radares").update({
           status: "processando", fonte: PROVIDER, iniciado_em: new Date().toISOString(), erro: null,
