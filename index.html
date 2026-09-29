@@ -1062,7 +1062,13 @@ function bindRadarProcessing(){
       }).select().single();
       if(radarError) throw radarError;
       const { data, error }=await sb.functions.invoke('search-google-places',{body:{radar_id:radar.id,query,location:localizacao,result_limit:limite}});
-      if(error) throw error;
+      if(error){
+        let message=error.message;
+        if(error.context&&typeof error.context.json==='function'){
+          try{ const details=await error.context.json(); message=details.error||details.message||message; }catch(ignore){}
+        }
+        throw new Error(message);
+      }
       if(data&&data.error) throw new Error(data.error);
       clearInterval(timer); wrap.innerHTML='';
       await loadAllData(state.userId);

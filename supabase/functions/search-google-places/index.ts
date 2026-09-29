@@ -45,11 +45,13 @@ export default {
       const location = cleanText(body.location);
       const limit = Math.max(1, Math.min(20, Number(body.result_limit) || 20));
       if (!radarId || !query || !location) return Response.json({ error: "Radar, segmento e localização são obrigatórios." }, { status: 400 });
+      const userId = ctx.userClaims?.id;
+      if (!userId) return Response.json({ error: "Não foi possível identificar o usuário autenticado." }, { status: 401 });
 
       const { data: radar, error: radarError } = await ctx.supabase.from("radares").select("id").eq("id", radarId).single();
       if (radarError || !radar) return Response.json({ error: "Radar não encontrado." }, { status: 404 });
       const { data: run, error: runError } = await ctx.supabase.from("radar_runs").insert({
-        radar_id: radarId, user_id: ctx.user.id, consulta: query, localizacao: location, limite_resultados: limit,
+        radar_id: radarId, user_id: userId, consulta: query, localizacao: location, limite_resultados: limit,
       }).select("id").single();
       if (runError) throw runError;
       runId = run.id;
@@ -76,7 +78,7 @@ export default {
         if (!place.websiteUri) signals.push("semSite");
         if (!place.nationalPhoneNumber) signals.push("semWhats");
         const { data: company, error: companyError } = await ctx.supabase.from("empresas").upsert({
-          user_id: ctx.user.id, radar_id: radarId, google_place_id: place.id, nome: place.displayName.text,
+          user_id: userId, radar_id: radarId, google_place_id: place.id, nome: place.displayName.text,
           segmento: place.primaryType ?? place.types?.[0] ?? query, cidade: location,
           endereco: place.formattedAddress ?? null, telefone: place.nationalPhoneNumber ?? null,
           site: place.websiteUri ?? null, nota: place.rating ?? null, avaliacoes: place.userRatingCount ?? 0,
@@ -95,13 +97,13 @@ export default {
           ["Reputação", score.reputation, 20, "Nota e volume de avaliações públicas."],
           ["Contato", score.contact, 15, "Canais públicos de contato encontrados."],
           ["Confiança", score.confidence, 20, "Quantidade de campos verificáveis retornados pelo Google."],
-        ].map(([dimensao, pontos, maximo, explicacao]) => ({ user_id: ctx.user.id, empresa_id: company.id, radar_run_id: runId, dimensao, pontos, maximo, explicacao })));
+        ].map(([dimensao, pontos, maximo, explicacao]) => ({ user_id: userId, empresa_id: company.id, radar_run_id: runId, dimensao, pontos, maximo, explicacao })));
 
         const channels: Array<{ tipo: string; valor: string; url: string | null; principal: boolean }> = [];
         if (place.googleMapsUri) channels.push({ tipo: "google_maps", valor: place.googleMapsUri, url: place.googleMapsUri, principal: true });
         if (place.websiteUri) channels.push({ tipo: "site", valor: place.websiteUri, url: place.websiteUri, principal: false });
         if (place.nationalPhoneNumber) channels.push({ tipo: "telefone", valor: place.nationalPhoneNumber, url: null, principal: false });
-        const channelRows = channels.map((channel) => ({ ...channel, user_id: ctx.user.id, empresa_id: company.id, fonte: "google_places", verificado_em: new Date().toISOString() }));
+        const channelRows = channels.map((channel) => ({ ...channel, user_id: userId, empresa_id: company.id, fonte: "google_places", verificado_em: new Date().toISOString() }));
         if (channelRows.length) await ctx.supabase.from("company_channels").upsert(channelRows, { onConflict: "empresa_id,tipo,valor" });
 
         const evidence = [];
