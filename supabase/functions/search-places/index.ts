@@ -28,8 +28,47 @@ type ApifyPlace = {
   permanentlyClosed?: boolean;
 };
 
+type Offer = {
+  id: string;
+  nome: string;
+  etapa: string;
+  categorias: string[];
+  sinais: string[];
+  prioridade: number;
+};
+
 function cleanText(value: unknown, max = 240) {
   return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
+}
+
+function normalizeText(value: unknown) {
+  return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+function matchOffer(place: ApifyPlace, signals: string[], offer: Offer) {
+  const placeText = normalizeText([place.title, place.categoryName, ...(place.categories ?? [])].join(" "));
+  const categoryMatches = (offer.categorias ?? []).filter((category) => placeText.includes(normalizeText(category)));
+  const signalMatches = (offer.sinais ?? []).filter((signal) => signals.includes(signal));
+  let compatibility = 25 + Math.round((Number(offer.prioridade) || 50) * 0.25);
+  compatibility += offer.categorias?.length ? (categoryMatches.length ? 35 : 0) : 15;
+  compatibility += Math.min(25, signalMatches.length * 15);
+  if (offer.etapa === "principal") compatibility += 5;
+  compatibility = Math.min(100, compatibility);
+  const reasons = [];
+  if (categoryMatches.length) reasons.push(`categoria compatível: ${categoryMatches.slice(0, 2).join(", ")}`);
+  if (signalMatches.length) reasons.push(`${signalMatches.length} sinal(is) de oportunidade relacionado(s)`);
+  if (!reasons.length) reasons.push("produto selecionado para este radar comercial");
+  return { offer, compatibility, reason: `Recomendação baseada em ${reasons.join(" e ")}.` };
+}
+
+async function radarOffers(ctx: any, radarId: string): Promise<Offer[]> {
+  const { data: links, error: linkError } = await ctx.supabase.from("radar_offers").select("offer_id").eq("radar_id", radarId);
+  if (linkError) throw linkError;
+  const ids = (links ?? []).map((link: { offer_id: string }) => link.offer_id);
+  if (!ids.length) return [];
+  const { data, error } = await ctx.supabase.from("offers").select("id,nome,etapa,categorias,sinais,prioridade").in("id", ids).eq("ativo", true);
+  if (error) throw error;
+  return (data ?? []) as Offer[];
 }
 
 async function apifyRequest(path: string, token: string, init?: RequestInit) {
@@ -79,6 +118,7 @@ async function markFailed(ctx: any, runId: string | null, radarId: string | null
 async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
   const saved = [];
   const collectedAt = new Date().toISOString();
+  const offers = await radarOffers(ctx, run.radar_id);
 
   for (const place of places.slice(0, run.limite_resultados)) {
     const name = cleanText(place.title);
@@ -92,6 +132,8 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
     if (!place.website) signals.push("semSite");
     if (!place.phone) signals.push("semWhats");
     const sourceUrl = place.url ?? null;
+    const offerMatches = offers.map((offer) => matchOffer(place, signals, offer)).sort((a, b) => b.compatibility - a.compatibility);
+    const recommendation = offerMatches[0];
 
     const { data: company, error: companyError } = await ctx.supabase.from("empresas").upsert({
       user_id: run.user_id,
@@ -116,7 +158,7 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
       potencial: potential,
       status: "Nova",
       ultima_atualizacao: collectedAt.slice(0, 10),
-      servico_recomendado: place.website ? "Otimização da presença digital e conversão" : "Criação de site e presença digital",
+      servico_recomendado: recommendation?.offer.nome ?? (place.website ? "Otimização da presença digital e conversão" : "Criação de site e presença digital"),
       sinais_keys: signals,
       business_status: place.temporarilyClosed ? "CLOSED_TEMPORARILY" : "OPERATIONAL",
       latitude: place.location?.lat ?? null,
@@ -124,6 +166,16 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
       coletado_em: collectedAt,
     }, { onConflict: "user_id,source_provider,source_place_id" }).select("id,nome,score,potencial").single();
     if (companyError) throw companyError;
+
+    if (offerMatches.length) {
+      const { error: deleteMatchError } = await ctx.supabase.from("company_offer_matches").delete().eq("empresa_id", company.id).eq("radar_id", run.radar_id);
+      if (deleteMatchError) throw deleteMatchError;
+      const { error: matchError } = await ctx.supabase.from("company_offer_matches").insert(offerMatches.map((match, index) => ({
+        user_id: run.user_id, empresa_id: company.id, radar_id: run.radar_id, offer_id: match.offer.id,
+        compatibilidade: match.compatibility, motivo: match.reason, principal: index === 0,
+      })));
+      if (matchError) throw matchError;
+    }
 
     await ctx.supabase.from("score_components").delete().eq("empresa_id", company.id).eq("versao_modelo", "apify-google-v1");
     const { error: scoreError } = await ctx.supabase.from("score_components").insert([

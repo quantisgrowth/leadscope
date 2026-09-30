@@ -9,6 +9,8 @@ Plataforma de inteligência comercial para agências, prestadores de serviços e
 - Chave do provedor protegida em uma Supabase Edge Function; ela nunca vai para o navegador.
 - Empresas, canais públicos, evidências e componentes do score salvos separadamente.
 - Score inicial explicável em cinco dimensões: perfil, oportunidade, reputação, contato e confiança.
+- Catálogo de produtos organizado em uma esteira de entrada, oferta principal, expansão e recorrência.
+- Seleção de produtos por radar e recomendação explicável de oferta para cada empresa encontrada.
 - RLS e permissões para cada usuário acessar somente os próprios dados.
 - Preservação dos dados existentes durante a migração.
 
@@ -35,11 +37,11 @@ Não coloque `APIFY_API_TOKEN` nem a chave `service_role` no `index.html`. A cha
 
 ## Fluxo do produto
 
-1. O usuário informa sua operação e oferta.
+1. O usuário informa sua operação e organiza seus produtos na esteira comercial.
 2. Define o tipo de empresa e a região desejada.
 3. Revisa os dados e abre o primeiro radar.
 4. O navegador cria o radar autenticado e chama a Edge Function.
-5. A função consulta o provedor configurado, calcula o score, registra evidências e devolve a quantidade encontrada.
+5. A função consulta o provedor configurado, calcula o score, cruza os sinais com as ofertas selecionadas, registra evidências e devolve a quantidade encontrada.
 
 O CNPJ e a análise profunda de site/redes sociais ficam preparados como próximos módulos. Esta etapa evita afirmar problemas que ainda não foram realmente verificados.
 

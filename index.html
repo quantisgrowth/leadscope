@@ -262,6 +262,14 @@ const SERVICOS = [
   'Redesign do site com foco em dispositivos móveis',
   'Plano de conteúdo e presença em redes sociais',
 ];
+const OFFER_STAGES = [
+  {key:'entrada', label:'1. Entrada', hint:'Diagnóstico ou primeira entrega'},
+  {key:'principal', label:'2. Oferta principal', hint:'Solução central da operação'},
+  {key:'expansao', label:'3. Expansão', hint:'Complemento ou próximo passo'},
+  {key:'recorrencia', label:'4. Recorrência', hint:'Relacionamento contínuo'},
+];
+const OFFER_TYPES = {servico:'Serviço',produto:'Produto',software:'Software',recorrencia:'Recorrência'};
+const BILLING_MODELS = {unico:'Pagamento único',mensal:'Mensal',anual:'Anual',sob_consulta:'Sob consulta'};
 const CURATED_BUSINESS_CATEGORIES = [
   'Academia','Advogado','Agência de marketing','Arquiteto','Autoescola','Clínica de estética',
   'Clínica médica','Clínica odontológica','Construtora','Contabilidade','Corretora de imóveis',
@@ -272,6 +280,7 @@ const CURATED_BUSINESS_CATEGORIES = [
   'Serviço de logística','Serviço de manutenção','Serviço de transporte','Transportadora'
 ];
 let radarCategories = null;
+let radarOfferIds = null;
 
 function classificacao(score){ if(score>=80) return {label:'Alto potencial', color:'var(--blue)'}; if(score>=60) return {label:'Potencial relevante', color:'var(--blue-light)'}; if(score>=40) return {label:'Acompanhar', color:'var(--warn)'}; return {label:'Baixa prioridade', color:'var(--text-secondary)'}; }
 function potencialBand(score){ return score>=70?'alto':score>=40?'medio':'baixo'; }
@@ -293,8 +302,27 @@ function formatOpeningHours(sourcePayload){
 // das chaves salvas no banco (empresas.sinais_keys), evitando duplicar esses textos no schema SQL.
 function sinaisFromKeys(keys){ return (keys||[]).map(k=>SIGNAL_POOL.find(s=>s.key===k)).filter(Boolean); }
 
+function rowToOffer(row){
+  return {
+    id:row.id, nome:row.nome||'', resultado:row.resultado||'', descricao:row.descricao||'',
+    ticketMin:row.ticket_min, ticketMax:row.ticket_max, ativo:row.ativo!==false,
+    tipo:row.tipo||'servico', etapa:row.etapa||'principal', modeloCobranca:row.modelo_cobranca||'unico',
+    publicoAlvo:row.publico_alvo||'', categorias:Array.isArray(row.categorias)?row.categorias:[],
+    sinais:Array.isArray(row.sinais)?row.sinais:[], prioridade:Number(row.prioridade)||50,
+    posicao:Number(row.posicao)||0,
+  };
+}
+
+function formatOfferPrice(offer){
+  const currency=value=>Number(value).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0});
+  if(offer.ticketMin!=null&&offer.ticketMax!=null) return `${currency(offer.ticketMin)} a ${currency(offer.ticketMax)}`;
+  if(offer.ticketMin!=null) return `A partir de ${currency(offer.ticketMin)}`;
+  if(offer.ticketMax!=null) return `Até ${currency(offer.ticketMax)}`;
+  return BILLING_MODELS[offer.modeloCobranca]||'Sob consulta';
+}
+
 // Converte uma linha da tabela `empresas` (+ suas `evidencias`) no formato que as telas usam.
-function rowToCompany(row, evidenciaRows, latestAudit){
+function rowToCompany(row, evidenciaRows, latestAudit, offerMatch){
   const sinais = sinaisFromKeys(row.sinais_keys);
   const sourceLabel=row.source_provider==='google_maps'?'Google Maps via Apify':'Fonte pública';
   if(!sinais.length) sinais.push({key:'perfilPublico', texto:'Estabelecimento localizado em uma fonte pública', fonte:sourceLabel, interpretacao:'Há dados públicos suficientes para iniciar uma qualificação comercial', servico:4});
@@ -315,7 +343,8 @@ function rowToCompany(row, evidenciaRows, latestAudit){
     score:row.score, confianca:row.confianca, potencial:row.potencial,
     sinais, evidencias,
     interpretacoes:[...new Set(sinais.map(s=>s.interpretacao))].slice(0,3),
-    servicoRecomendado: row.servico_recomendado,
+    servicoRecomendado: (offerMatch&&offerMatch.offer&&offerMatch.offer.nome)||row.servico_recomendado,
+    offerRecommendation:offerMatch||null,
     status: row.status,
     ultimaAtualizacao: row.ultima_atualizacao ? fmtDate(new Date(row.ultima_atualizacao+'T00:00:00')) : '',
     resultado: row.resultado,
@@ -424,6 +453,7 @@ let state = Object.assign({
   user:{ nome:'', empresa:'', plano:'Plano Piloto', email:'', cargo:'Head Comercial' },
   companies: [],
   radars: [],
+  offers: [], offerEditor:null,
   selectedOpps:[],
 }, loadUiPrefs());
 
@@ -438,13 +468,15 @@ const setPath = setPathLocal;
 
 /* ================= SUPABASE: CARREGAR / GRAVAR DADOS ================= */
 async function loadAllData(userId){
-  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}, {data:siteAuditRows}] = await Promise.all([
+  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}, {data:siteAuditRows}, {data:offerRows}, {data:offerMatchRows}] = await Promise.all([
     sb.from('profiles').select('*').eq('id', userId).maybeSingle(),
     sb.from('account_settings').select('*').eq('user_id', userId).maybeSingle(),
     sb.from('radares').select('*').eq('user_id', userId).order('criado_em', {ascending:false}),
     sb.from('empresas').select('*').eq('user_id', userId).order('score', {ascending:false}),
     sb.from('evidencias').select('*').order('data', {ascending:false}),
     sb.from('site_audits').select('*').eq('user_id', userId).order('created_at', {ascending:false}),
+    sb.from('offers').select('*').eq('user_id', userId).order('posicao', {ascending:true}),
+    sb.from('company_offer_matches').select('*,offer:offers(id,nome,etapa,tipo,modelo_cobranca,ticket_min,ticket_max)').eq('user_id', userId).eq('principal', true).order('compatibilidade', {ascending:false}),
   ]);
   const evByEmpresa = {};
   (evidenciasRows||[]).forEach(e=>{ (evByEmpresa[e.empresa_id] = evByEmpresa[e.empresa_id]||[]).push(e); });
@@ -454,7 +486,9 @@ async function loadAllData(userId){
   Object.entries(auditsByEmpresa).forEach(([empresaId,audits])=>{
     latestAuditByEmpresa[empresaId]=audits.find(audit=>['pendente','processando'].includes(audit.status))||audits.find(audit=>audit.status==='concluido')||audits[0];
   });
-  const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id], latestAuditByEmpresa[row.id]));
+  const matchByEmpresa={};
+  (offerMatchRows||[]).forEach(match=>{ if(!matchByEmpresa[match.empresa_id]) matchByEmpresa[match.empresa_id]=match; });
+  const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id], latestAuditByEmpresa[row.id], matchByEmpresa[row.id]));
   const ob = rowToOnboarding(settings) || state.onboarding;
   setState({
     userId,
@@ -465,6 +499,7 @@ async function loadAllData(userId){
     onboarded: !!(settings && settings.onboarded),
     onboardStep: Math.max(1, Math.min(3, Number((settings&&settings.onboarding_step)||1))),
     companies,
+    offers:(offerRows||[]).map(rowToOffer),
     radars: (radaresRows||[]).map(r=>({id:r.id, nome:r.nome, segmento:r.segmento, cidade:r.cidade, query:r.query, localizacao:r.localizacao, status:r.status||'pendente', criadoEm: r.criado_em ? fmtDate(new Date(r.criado_em+'T00:00:00')) : ''})),
     loggedIn:true, booting:false,
   });
@@ -1099,6 +1134,8 @@ function renderRadar(){
   const ob=state.onboarding;
   const segmento=(ob.segmentosDesejados||'').split(',')[0].trim();
   if(radarCategories===null) radarCategories=segmento?[segmento]:[];
+  const activeOffers=state.offers.filter(offer=>offer.ativo);
+  if(radarOfferIds===null) radarOfferIds=activeOffers.map(offer=>offer.id);
   return `
   <h1 class="page-title">Radar</h1>
   <p class="page-sub">Configure uma nova busca para encontrar empresas com necessidades comerciais verificáveis.</p>
@@ -1107,9 +1144,14 @@ function renderRadar(){
       <div class="card-title">Novo radar</div>
       <p class="card-sub">Busca empresas reais em fontes públicas e registra dados verificáveis.</p>
       <div class="field"><label class="label">Nome do radar</label><input class="input" id="rNome" placeholder="Ex: Clínicas odontológicas — Sorocaba" value="${esc(segmento+(ob.regiao?' — '+ob.regiao:''))}"></div>
-      <div class="grid" style="grid-template-columns:1fr 1fr;">
-        <div class="field"><label class="label">Categorias de empresa <span class="muted">(até 5)</span></label><div class="category-picker" id="rCategoryPicker"><span id="rCategoryChips"></span><input class="category-input" id="rCategoryInput" autocomplete="off" placeholder="Digite e pressione Enter"><div class="category-suggestions" id="rCategorySuggestions"></div></div><div class="muted" style="font-size:11.5px;margin-top:6px;">Selecione uma sugestão ou pressione Enter para adicionar outra categoria.</div></div>
-        <div class="field"><label class="label">Serviço que será oferecido</label><input class="input" id="rServico" value="${esc(ob.servico)}" readonly></div>
+      <div class="field"><label class="label">Categorias de empresa <span class="muted">(até 5)</span></label><div class="category-picker" id="rCategoryPicker"><span id="rCategoryChips"></span><input class="category-input" id="rCategoryInput" autocomplete="off" placeholder="Digite e pressione Enter"><div class="category-suggestions" id="rCategorySuggestions"></div></div><div class="muted" style="font-size:11.5px;margin-top:6px;">Selecione uma sugestão ou pressione Enter para adicionar outra categoria.</div></div>
+      <div class="field">
+        <label class="label">Produtos que poderão ser recomendados</label>
+        ${activeOffers.length?`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">${activeOffers.map(offer=>`
+          <label class="checkbox-row" style="margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;align-items:flex-start;">
+            <input type="checkbox" data-radar-offer value="${offer.id}" ${(radarOfferIds||[]).includes(offer.id)?'checked':''}>
+            <span><b style="display:block;color:var(--text);font-size:13px;">${esc(offer.nome)}</b><span class="muted" style="font-size:11.5px;">${esc((OFFER_STAGES.find(stage=>stage.key===offer.etapa)||{}).label||offer.etapa)} · ${esc(formatOfferPrice(offer))}</span></span>
+          </label>`).join('')}</div>`:`<div class="badge badge-gray" style="display:block;padding:10px 12px;">Cadastre produtos em Configurações › Oferta comercial antes de iniciar o radar.</div>`}
       </div>
       <div class="grid" style="grid-template-columns:1fr 1fr;">
         <div class="field"><label class="label">Cidade ou região</label><input class="input" id="rLocalizacao" value="${esc(ob.regiao)}" placeholder="Ex: Sorocaba, SP"></div>
@@ -1139,6 +1181,9 @@ function renderRadar(){
 }
 function bindRadarProcessing(){
   bindRadarCategoryPicker();
+  document.querySelectorAll('[data-radar-offer]').forEach(input=>input.addEventListener('change',()=>{
+    radarOfferIds=Array.from(document.querySelectorAll('[data-radar-offer]:checked')).map(item=>item.value);
+  }));
   const btn = document.getElementById('runRadar');
   if(!btn) return;
   btn.addEventListener('click', async ()=>{
@@ -1151,7 +1196,9 @@ function bindRadarProcessing(){
     const palavras=document.getElementById('rPalavras').value.trim();
     const limite=Number(document.getElementById('rQuantidade').value)||20;
     const raio=Number(document.getElementById('rRaio').value)||15000;
+    const selectedOfferIds=Array.from(document.querySelectorAll('[data-radar-offer]:checked')).map(item=>item.value);
     if(!nome||!categories.length||!localizacao){ toast('Informe o nome, ao menos uma categoria e a localização do radar.'); return; }
+    if(!selectedOfferIds.length){ toast('Selecione ao menos um produto para o LeadScope recomendar.'); return; }
     const steps = ['Localizando empresas','Coletando perfis públicos','Organizando dados encontrados','Calculando potencial comercial','Preparando recomendações'];
     const wrap = document.getElementById('processingModalWrap');
     let i=0, timer;
@@ -1180,6 +1227,8 @@ function bindRadarProcessing(){
         limite_resultados:limite,status:'pendente',fonte:'apify_google_maps'
       }).select().single();
       if(radarError) throw radarError;
+      const {error:offerLinkError}=await sb.from('radar_offers').insert(selectedOfferIds.map(offerId=>({radar_id:radar.id,offer_id:offerId,user_id:state.userId})));
+      if(offerLinkError) throw offerLinkError;
       const { data:startData, error:startError }=await sb.functions.invoke('search-places',{body:{action:'start',radar_id:radar.id,query:queries[0],queries,location:localizacao,result_limit:limite}});
       if(startError){
         let message=startError.message;
@@ -1210,6 +1259,7 @@ function bindRadarProcessing(){
       clearInterval(timer); wrap.innerHTML='';
       await loadAllData(state.userId);
       radarCategories=null;
+      radarOfferIds=null;
       toast('Radar concluído: '+Number((data&&data.found)||0)+' empresas encontradas.');
       navigate('#/oportunidades');
     }catch(e){
@@ -1366,6 +1416,9 @@ function renderDiagnostico(){
   const cls = classificacao(c.score);
   const msgs = msgTemplates(c);
   const tone = state.diagTone;
+  const currentOffer=c.offerRecommendation&&c.offerRecommendation.offer;
+  const currentStageIndex=currentOffer?OFFER_STAGES.findIndex(stage=>stage.key===currentOffer.etapa):-1;
+  const nextOffer=currentStageIndex>=0?state.offers.filter(offer=>offer.ativo&&OFFER_STAGES.findIndex(stage=>stage.key===offer.etapa)>currentStageIndex).sort((a,b)=>OFFER_STAGES.findIndex(stage=>stage.key===a.etapa)-OFFER_STAGES.findIndex(stage=>stage.key===b.etapa)||a.posicao-b.posicao)[0]:null;
 
   return `
   <button class="btn btn-sm btn-ghost" style="margin-bottom:14px;padding-left:0;" data-nav="#/oportunidades">${icon('arrow')} Voltar para oportunidades</button>
@@ -1403,7 +1456,9 @@ function renderDiagnostico(){
         <div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Confiança da análise</span><b style="color:var(--text)">${c.confianca}</b></div>
         <div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Evidências</span><b style="color:var(--text)">${c.evidencias.length}</b></div>
         <div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Data da coleta</span><b style="color:var(--text)">${c.ultimaAtualizacao}</b></div>
-        <div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Oferta relacionada</span><b style="color:var(--text);text-align:right;">${state.onboarding.servico||'Gestão digital'}</b></div>
+        <div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Oferta relacionada</span><b style="color:var(--text);text-align:right;">${esc(c.servicoRecomendado||state.onboarding.servico||'Não definida')}</b></div>
+        ${c.offerRecommendation?`<div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Compatibilidade</span><b style="color:var(--blue-light);">${c.offerRecommendation.compatibilidade}%</b></div>`:''}
+        ${nextOffer?`<div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Próxima oferta</span><b style="color:var(--text);text-align:right;">${esc(nextOffer.nome)}</b></div>`:''}
       </div>
     </div>
 
@@ -1430,7 +1485,7 @@ function renderDiagnostico(){
           <div class="evidence-item">
             <div style="font-weight:700;font-size:13.5px;margin-bottom:4px;">${c.servicoRecomendado}</div>
             <div class="muted" style="font-size:12.5px;margin-bottom:6px;">Prioridade: <b style="color:var(--text)">${c.potencial==='alto'?'Alta':c.potencial==='medio'?'Média':'Baixa'}</b></div>
-            <div style="font-size:13px;">Ofereça uma revisão da jornada de contato e uma página otimizada para conversão, com foco nos pontos identificados nas evidências.</div>
+            <div style="font-size:13px;">${esc((c.offerRecommendation&&c.offerRecommendation.motivo)||'Oferta relacionada aos sinais públicos encontrados nesta empresa.')}</div>
           </div>
         </div>
       </div>
@@ -1789,6 +1844,48 @@ function matchResult(c,label){
 }
 
 /* ================= CONFIGURACOES ================= */
+function renderOfferCatalog(){
+  const editor=state.offerEditor;
+  const editorHtml=editor?`
+    <div style="border:1px solid var(--blue);border-radius:10px;padding:16px;margin-bottom:18px;background:rgba(52,120,246,.04);">
+      <div class="row between wrap" style="margin-bottom:14px;"><div><div class="card-title">${editor.id?'Editar produto':'Novo produto'}</div><div class="card-sub">Defina onde ele entra na esteira e em quais oportunidades deve ser recomendado.</div></div><button class="btn btn-sm" id="cancelOffer">Cancelar</button></div>
+      <div class="grid" style="grid-template-columns:1.3fr .7fr;">
+        <div class="field"><label class="label">Nome do produto *</label><input class="input" id="offerName" value="${esc(editor.nome||'')}" placeholder="Ex: Diagnóstico de presença digital"></div>
+        <div class="field"><label class="label">Etapa da esteira</label><select class="input" id="offerStage">${OFFER_STAGES.map(stage=>`<option value="${stage.key}" ${editor.etapa===stage.key?'selected':''}>${stage.label}</option>`).join('')}</select></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr 1fr;">
+        <div class="field"><label class="label">Tipo</label><select class="input" id="offerType">${Object.entries(OFFER_TYPES).map(([key,label])=>`<option value="${key}" ${editor.tipo===key?'selected':''}>${label}</option>`).join('')}</select></div>
+        <div class="field"><label class="label">Modelo de cobrança</label><select class="input" id="offerBilling">${Object.entries(BILLING_MODELS).map(([key,label])=>`<option value="${key}" ${editor.modeloCobranca===key?'selected':''}>${label}</option>`).join('')}</select></div>
+        <div class="field"><label class="label">Prioridade de recomendação</label><input class="input" id="offerPriority" type="number" min="0" max="100" value="${editor.prioridade??50}"></div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;">
+        <div class="field"><label class="label">Ticket mínimo</label><input class="input" id="offerTicketMin" type="number" min="0" step="0.01" value="${editor.ticketMin??''}" placeholder="0,00"></div>
+        <div class="field"><label class="label">Ticket máximo</label><input class="input" id="offerTicketMax" type="number" min="0" step="0.01" value="${editor.ticketMax??''}" placeholder="0,00"></div>
+      </div>
+      <div class="field"><label class="label">Problema que resolve / resultado prometido</label><input class="input" id="offerResult" value="${esc(editor.resultado||'')}" placeholder="Ex: aumentar a geração de oportunidades pelo site"></div>
+      <div class="field"><label class="label">Descrição</label><textarea class="input" id="offerDescription" rows="3" placeholder="Explique a entrega e seu principal benefício.">${esc(editor.descricao||'')}</textarea></div>
+      <div class="field"><label class="label">Público-alvo</label><input class="input" id="offerAudience" value="${esc(editor.publicoAlvo||'')}" placeholder="Ex: prestadores de serviços locais com até 50 funcionários"></div>
+      <div class="field"><label class="label">Categorias compatíveis <span class="muted">(separadas por vírgula)</span></label><input class="input" id="offerCategories" value="${esc((editor.categorias||[]).join(', '))}" placeholder="Ex: Clínica odontológica, Academia, Restaurante"></div>
+      <div class="field"><label class="label">Sinais que tornam essa oferta relevante</label><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:7px;">${SIGNAL_POOL.map(signal=>`<label class="checkbox-row" style="margin:0;font-size:12px;"><input type="checkbox" data-offer-signal value="${signal.key}" ${(editor.sinais||[]).includes(signal.key)?'checked':''}> ${esc(signal.texto)}</label>`).join('')}</div></div>
+      <button class="btn btn-primary" id="saveOffer">${editor.id?'Salvar produto':'Adicionar à esteira'}</button>
+    </div>`:'';
+  const columns=OFFER_STAGES.map(stage=>{
+    const offers=state.offers.filter(offer=>offer.etapa===stage.key).sort((a,b)=>a.posicao-b.posicao||b.prioridade-a.prioridade);
+    return `<div style="min-width:0;border:1px solid var(--border);border-radius:10px;padding:12px;background:rgba(255,255,255,.012);">
+      <div style="font-size:13px;font-weight:700;">${stage.label}</div><div class="muted" style="font-size:11px;margin:3px 0 10px;">${stage.hint}</div>
+      ${offers.length?offers.map(offer=>`<div style="border:1px solid var(--border);border-radius:8px;padding:11px;margin-top:8px;opacity:${offer.ativo?'1':'.55'};">
+        <div class="row between" style="gap:8px;align-items:flex-start;"><b style="font-size:12.5px;line-height:1.35;">${esc(offer.nome)}</b><span class="badge ${offer.ativo?'badge-blue':'badge-gray'}">${offer.ativo?'Ativo':'Inativo'}</span></div>
+        <div class="muted" style="font-size:11.5px;margin-top:6px;">${esc(OFFER_TYPES[offer.tipo]||offer.tipo)} · ${esc(formatOfferPrice(offer))}</div>
+        ${offer.resultado?`<div style="font-size:11.5px;margin-top:7px;line-height:1.4;">${esc(offer.resultado)}</div>`:''}
+        <div class="row gap-8" style="margin-top:10px;"><button class="btn btn-sm" data-offer-edit="${offer.id}">Editar</button><button class="btn btn-sm" data-offer-toggle="${offer.id}">${offer.ativo?'Desativar':'Ativar'}</button></div>
+      </div>`).join(''):`<div class="muted" style="font-size:11.5px;padding:14px 4px;">Nenhum produto nesta etapa.</div>`}
+    </div>`;
+  }).join('');
+  return `${editorHtml}
+    <div class="row between wrap" style="margin-bottom:14px;"><div><div class="card-title">Esteira de produtos</div><div class="card-sub">Organize o que vender primeiro, depois e de forma recorrente.</div></div><button class="btn btn-primary btn-sm" id="newOffer">${icon('plus')} Novo produto</button></div>
+    ${state.offers.length?`<div class="grid" style="grid-template-columns:repeat(4,minmax(190px,1fr));gap:10px;overflow-x:auto;">${columns}</div>`:`<div class="empty" style="padding:34px 10px;border:1px dashed var(--border);border-radius:10px;"><h4>Sua esteira ainda está vazia</h4><p>Cadastre a primeira oferta para conectá-la aos próximos radares.</p></div>`}`;
+}
+
 function renderConfiguracoes(){
   const ob = state.onboarding;
   const tab = state.configTab || 'perfil';
@@ -1806,10 +1903,7 @@ function renderConfiguracoes(){
       <div class="field"><label class="label">Segmento</label><input class="input" data-cfg="onboarding.segmento" value="${esc(ob.segmento)}"></div>
       <div class="field"><label class="label">Cidade e estado</label><input class="input" data-cfg="onboarding.cidade" value="${esc(ob.cidade)}"></div>`;
   } else if(tab==='oferta'){
-    inner = `
-      <div class="field"><label class="label">Serviço principal vendido</label><input class="input" data-cfg="onboarding.servico" value="${esc(ob.servico)}"></div>
-      <div class="field"><label class="label">Ticket médio</label><input class="input" data-cfg="onboarding.ticket" value="${esc(ob.ticket)}"></div>
-      <div class="field"><label class="label">Descrição da oferta</label><textarea class="input" rows="3" data-cfg="onboarding.descricao">${esc(ob.descricao)}</textarea></div>`;
+    inner = renderOfferCatalog();
   } else if(tab==='cliente'){
     inner = `
       <div class="field"><label class="label">Segmentos desejados</label><input class="input" data-cfg="onboarding.segmentosDesejados" value="${esc(ob.segmentosDesejados)}"></div>
@@ -1859,8 +1953,7 @@ function renderConfiguracoes(){
       ${tabs.map(([k,l])=>`<div class="nav-item" style="padding:9px 14px;border-radius:8px;" data-configtab="${k}" data-active="${tab===k}">${l}</div>`).join('')}
     </div>
     <div class="card">${inner}
-      <div class="divider"></div>
-      <button class="btn btn-primary" id="saveConfig">Salvar alterações</button>
+      ${tab==='oferta'?'':`<div class="divider"></div><button class="btn btn-primary" id="saveConfig">Salvar alterações</button>`}
     </div>
   </div>`;
 }
@@ -1934,6 +2027,47 @@ function bindConfiguracoes(){
       state.onboarding.pesos[k] = +sl.value;
       document.getElementById('cv_'+k).textContent = sl.value+'%';
     });
+  });
+  const newOffer=document.getElementById('newOffer');
+  if(newOffer) newOffer.addEventListener('click',()=>setState({offerEditor:{
+    nome:'',resultado:'',descricao:'',ticketMin:null,ticketMax:null,ativo:true,tipo:'servico',
+    etapa:'entrada',modeloCobranca:'unico',publicoAlvo:'',categorias:[],sinais:[],prioridade:50,posicao:state.offers.length,
+  }}));
+  const cancelOffer=document.getElementById('cancelOffer');
+  if(cancelOffer) cancelOffer.addEventListener('click',()=>setState({offerEditor:null}));
+  document.querySelectorAll('[data-offer-edit]').forEach(button=>button.addEventListener('click',()=>{
+    const offer=state.offers.find(item=>item.id===button.getAttribute('data-offer-edit'));
+    if(offer) setState({offerEditor:Object.assign({},offer,{categorias:offer.categorias.slice(),sinais:offer.sinais.slice()})});
+  }));
+  document.querySelectorAll('[data-offer-toggle]').forEach(button=>button.addEventListener('click',async()=>{
+    const offer=state.offers.find(item=>item.id===button.getAttribute('data-offer-toggle'));
+    if(!offer) return;
+    button.disabled=true;
+    const {error}=await sb.from('offers').update({ativo:!offer.ativo,updated_at:new Date().toISOString()}).eq('id',offer.id);
+    if(error){ button.disabled=false; toast('Não foi possível atualizar o produto.'); return; }
+    offer.ativo=!offer.ativo; radarOfferIds=null; render(); toast(`Produto ${offer.ativo?'ativado':'desativado'}.`);
+  }));
+  const saveOffer=document.getElementById('saveOffer');
+  if(saveOffer) saveOffer.addEventListener('click',async()=>{
+    const value=id=>document.getElementById(id).value.trim();
+    const nome=value('offerName');
+    const ticketMin=value('offerTicketMin'), ticketMax=value('offerTicketMax');
+    if(!nome){ toast('Informe o nome do produto.'); return; }
+    if(ticketMin!==''&&ticketMax!==''&&Number(ticketMax)<Number(ticketMin)){ toast('O ticket máximo deve ser maior ou igual ao mínimo.'); return; }
+    const payload={
+      user_id:state.userId,nome,etapa:value('offerStage'),tipo:value('offerType'),modelo_cobranca:value('offerBilling'),
+      prioridade:Math.max(0,Math.min(100,Number(value('offerPriority'))||50)),
+      ticket_min:ticketMin===''?null:Number(ticketMin),ticket_max:ticketMax===''?null:Number(ticketMax),
+      resultado:value('offerResult')||null,descricao:value('offerDescription')||null,publico_alvo:value('offerAudience')||null,
+      categorias:value('offerCategories').split(',').map(item=>item.trim()).filter(Boolean).slice(0,20),
+      sinais:Array.from(document.querySelectorAll('[data-offer-signal]:checked')).map(input=>input.value),
+      ativo:state.offerEditor.ativo!==false,posicao:Number(state.offerEditor.posicao)||0,updated_at:new Date().toISOString(),
+    };
+    saveOffer.disabled=true;
+    const request=state.offerEditor.id?sb.from('offers').update(payload).eq('id',state.offerEditor.id):sb.from('offers').insert(payload);
+    const {error}=await request;
+    if(error){ saveOffer.disabled=false; toast('Não foi possível salvar o produto: '+error.message); return; }
+    state.offerEditor=null; radarOfferIds=null; await loadAllData(state.userId); toast('Produto salvo e incluído na esteira.');
   });
   const save = document.getElementById('saveConfig');
   if(save) save.addEventListener('click', async ()=>{
