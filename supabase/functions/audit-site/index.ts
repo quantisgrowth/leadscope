@@ -1,5 +1,6 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "@supabase/server";
+import { accountId } from "../_shared/account.ts";
 
 const APIFY_ACTOR = "apify~website-content-crawler";
 const PROVIDER = "apify_website_content_crawler";
@@ -183,7 +184,7 @@ export default {
     try {
       const body = await req.json();
       const action = body.action === "status" ? "status" : "start";
-      const userId = ctx.userClaims?.id;
+      const userId = await accountId(ctx);
       if (!userId) return Response.json({ error: "Não foi possível identificar o usuário autenticado." }, { status: 401 });
 
       if (action === "start") {

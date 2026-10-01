@@ -1,5 +1,6 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "@supabase/server";
+import { accountId } from "../_shared/account.ts";
 
 function normalizeText(value: unknown) {
   return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -65,7 +66,7 @@ export default {
   fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
     if (req.method !== "POST") return Response.json({ error: "Método não permitido" }, { status: 405 });
     try {
-      const userId = ctx.userClaims?.id;
+      const userId = await accountId(ctx);
       if (!userId) return Response.json({ error: "Não foi possível identificar o usuário autenticado." }, { status: 401 });
       const body = await req.json().catch(() => ({}));
       const companyId = String(body.company_id ?? "").trim();

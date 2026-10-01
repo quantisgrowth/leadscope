@@ -2,6 +2,7 @@
 <html lang="pt-BR" data-theme="dark">
 <head>
 <meta charset="UTF-8">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>LeadScope — Inteligência comercial</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -287,6 +288,13 @@ const recoveryHash = new URLSearchParams(window.location.hash.slice(1));
 const recoveryQuery = new URLSearchParams(window.location.search);
 let passwordRecoveryPending = recoveryHash.get('type') === 'recovery' || recoveryQuery.get('type') === 'recovery';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let pendingTeamInvite=sessionStorage.getItem('leadscope_team_invite')||'';
+if(/^[a-f0-9]{64}$/.test(recoveryQuery.get('team_invite')||'')){
+  pendingTeamInvite=recoveryQuery.get('team_invite');
+  sessionStorage.setItem('leadscope_team_invite',pendingTeamInvite);
+  const cleanUrl=new URL(window.location.href);cleanUrl.searchParams.delete('team_invite');
+  history.replaceState({},document.title,cleanUrl.pathname+cleanUrl.search+cleanUrl.hash);
+}
 
 /* ================= DATA MODEL ================= */
 const SIGNAL_POOL = [
@@ -458,6 +466,7 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds, of
     resultado: row.resultado,
     monitorada: !!row.monitorada,
     archivedAt:row.archived_at||null,
+    mergedInto:row.merged_into||null,
     folderIds:folderIds||[],
     mensagemGerada: row.mensagem_gerada, mensagemTom: row.mensagem_tom || 'consultivo', mensagemUtilizada: !!row.mensagem_utilizada,
     cnpj:row.cnpj||'', cnpjStatus:row.cnpj_status||'', cnpjActive:row.cnpj_active,
@@ -657,19 +666,24 @@ const setPath = setPathLocal;
 
 /* ================= SUPABASE: CARREGAR / GRAVAR DADOS ================= */
 async function loadAllData(userId){
+  const {data:{session}}=await sb.auth.getSession();
+  const authId=session&&session.user.id||userId;
+  const {data:accountOwner}=await sb.rpc('current_account_id');
+  const {data:canWrite}=await sb.rpc('current_account_can_write');
+  userId=accountOwner||authId; // Compatible with the existing installation until SQL is applied.
   const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}, {data:siteAuditRows}, {data:offerRows}, {data:offerMatchRows}, {data:folderRows}, {data:folderLinkRows}, {data:statusHistoryRows}, {data:adminMarker}, {data:integrationRows}, {data:scoreRows}] = await Promise.all([
-    sb.from('profiles').select('*').eq('id', userId).maybeSingle(),
+    sb.from('profiles').select('*').eq('id', authId).maybeSingle(),
     sb.from('account_settings').select('*').eq('user_id', userId).maybeSingle(),
     sb.from('radares').select('*').eq('user_id', userId).order('criado_em', {ascending:false}),
     sb.from('empresas').select('*').eq('user_id', userId).order('score', {ascending:false}),
     sb.from('evidencias').select('*').order('data', {ascending:false}),
     sb.from('site_audits').select('*').eq('user_id', userId).order('created_at', {ascending:false}),
     sb.from('offers').select('*').eq('user_id', userId).order('posicao', {ascending:true}),
-    sb.from('company_offer_matches').select('*,offer:offers(*)').eq('user_id', userId).order('compatibilidade', {ascending:false}),
+    sb.from('company_offer_matches').select('*,offer:offers(*)').eq('user_id', userId).order('created_at', {ascending:false}),
     sb.from('opportunity_folders').select('*').eq('user_id', userId).order('updated_at', {ascending:false}),
     sb.from('opportunity_folder_companies').select('folder_id,empresa_id').eq('user_id', userId),
     sb.from('company_status_history').select('empresa_id,status_anterior,status_novo,changed_by,changed_at').eq('user_id', userId).order('changed_at', {ascending:false}),
-    sb.from('platform_admins').select('user_id').eq('user_id', userId).maybeSingle(),
+    sb.from('platform_admins').select('user_id').eq('user_id', authId).maybeSingle(),
     sb.from('platform_integrations').select('key,display_name,description,connected,sort_order').order('sort_order', {ascending:true}),
     sb.from('score_components').select('empresa_id,dimensao,pontos,maximo,explicacao,calculado_em').eq('user_id',userId).order('calculado_em',{ascending:false}),
   ]);
@@ -682,8 +696,13 @@ async function loadAllData(userId){
     latestAuditByEmpresa[empresaId]=audits.find(audit=>['pendente','processando'].includes(audit.status))||audits.find(audit=>audit.status==='concluido')||audits[0];
   });
   const matchesByEmpresa={};
+  const newestMatchBatch={};
   (offerMatchRows||[]).forEach(match=>{
+    const batch=match.analysis_batch||match.created_at;
+    if(!newestMatchBatch[match.empresa_id]) newestMatchBatch[match.empresa_id]=batch;
+    if(newestMatchBatch[match.empresa_id]!==batch) return;
     if(match.offer) match.offer=rowToOffer(match.offer);
+    if(match.offer&&!match.offer.ativo) return;
     (matchesByEmpresa[match.empresa_id]=matchesByEmpresa[match.empresa_id]||[]).push(match);
   });
   const matchByEmpresa={};
@@ -701,7 +720,7 @@ async function loadAllData(userId){
   });
   const ob = rowToOnboarding(settings) || state.onboarding;
   setState({
-    userId,
+    userId,authUserId:authId,isAccountOwner:userId===authId,readOnly:userId!==authId&&canWrite!==true,
     user: { nome: (profile&&profile.nome) || state.user.nome, empresa: ob.empresa || state.user.empresa,
       plano: (profile&&profile.plano) || 'Plano Piloto', email: (profile&&profile.email) || '',
       cargo: (profile&&profile.cargo) || 'Head Comercial', isPlatformAdmin:!!adminMarker },
@@ -729,7 +748,7 @@ async function persistSettingsPartial(){
   await sb.from('account_settings').update(onboardingToRow(state.onboarding)).eq('user_id', state.userId);
 }
 async function persistCompanyField(id, fields){
-  const {error}=await sb.from('empresas').update(fields).eq('id', id).eq('user_id',state.userId);
+  const {error}=await sb.from('empresas').update(fields).eq('id', id).eq('user_id',state.userId).select('id').single();
   if(error) throw error;
 }
 async function updateCompanyStatus(company, nextStatus){
@@ -766,7 +785,7 @@ sb.auth.onAuthStateChange((event, session)=>{
   } else if(event === 'SIGNED_IN' && session && session.user){
     if(passwordRecoveryPending){
       setState({ loggedIn:false, authMode:'update', authEmail:session.user.email||state.authEmail, authLoading:false, authError:null, booting:false });
-    } else if(state.userId !== session.user.id){
+    } else if(state.authUserId !== session.user.id){
       loadAllData(session.user.id);
     }
   }
@@ -927,6 +946,18 @@ function render(){
   const app = document.getElementById('app');
   if(state.booting){ app.innerHTML = `<div class="boot-screen"><div class="boot-spinner"></div><span class="muted" style="font-size:13.5px;">Carregando LeadScope…</span></div>`; return; }
   if(!state.loggedIn){ app.innerHTML = renderLogin(); bindLogin(); return; }
+  if(pendingTeamInvite){
+    app.innerHTML=`<div class="card" style="max-width:520px;margin:10vh auto;"><h2>Aceitar convite para uma conta</h2><p>Você está conectado como ${esc(state.user.email||'usuário')}. O convite só pode ser aceito pelo e-mail destinatário confirmado.</p><button class="btn btn-primary" id="acceptTeamInvite">Aceitar convite</button> <button class="btn" id="cancelTeamInvite">Cancelar</button><p class="muted" id="teamAcceptError"></p></div>`;
+    document.getElementById('cancelTeamInvite').onclick=()=>{pendingTeamInvite='';sessionStorage.removeItem('leadscope_team_invite');render();};
+    document.getElementById('acceptTeamInvite').onclick=async(event)=>{
+      const button=event.currentTarget;button.disabled=true;
+      try{
+        await teamRequest({action:'accept',token:pendingTeamInvite});
+        pendingTeamInvite='';sessionStorage.removeItem('leadscope_team_invite');
+        await loadAllData(state.authUserId);toast('Convite aceito. Você está na conta compartilhada.');
+      }catch(error){ document.getElementById('teamAcceptError').textContent=error.message;button.disabled=false; }
+    };return;
+  }
   if(!state.onboarded){ app.innerHTML = renderOnboarding(); bindOnboarding(); return; }
 
   const routeParts = (state.route||'#/overview').split('/');
@@ -988,6 +1019,9 @@ function render(){
   </div>`;
   bindShell();
   bindPageEvents(route);
+  if(state.readOnly){
+    document.querySelectorAll('#monitorBtn,#prepBtn,#reanalyzeCompanyBtn,#auditSiteBtn,#validateCnpjBtn,#bulkAddFolder,#bulkRemoveFolder,#bulkReanalyze,#bulkMonitor,#bulkStatus,#bulkArchive,#saveConfig,#saveOffer,#newOppFolder,#renameOppFolder,#deleteOppFolder,[data-setstatus],[data-offer-toggle],[data-result]').forEach(el=>{el.disabled=true;el.title='Acesso somente leitura';});
+  }
 }
 function initials(name){ return name.split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase(); }
 function activeRoute(href){
@@ -1505,7 +1539,8 @@ function opportunityDataset(){
   let list=state.companies.slice();
   if(f.archive==='ativas') list=list.filter(c=>!c.archivedAt);
   else if(f.archive==='arquivadas') list=list.filter(c=>!!c.archivedAt);
-  if(f.folderId!=='todos') list=list.filter(c=>(c.folderIds||[]).includes(f.folderId));
+  if(f.folderId==='sem_pasta') list=list.filter(c=>!(c.folderIds||[]).length);
+  else if(f.folderId!=='todos') list=list.filter(c=>(c.folderIds||[]).includes(f.folderId));
   const query=normalizedText(f.search);
   if(query) list=list.filter(c=>normalizedText([c.nome,c.segmento,companyLocation(c),c.servicoRecomendado].join(' ')).includes(query));
   if(f.potencial!=='todos') list=list.filter(c=>c.potencial===f.potencial);
@@ -1540,7 +1575,7 @@ function opportunityFilterChips(f){
     ['scoreMax',f.scoreMax!==''&&`Score máximo ${f.scoreMax}`], ['potencial',f.potencial!=='todos'&&`Potencial: ${f.potencial}`],
     ['offerId',offer&&`Produto: ${offer.nome}`], ['offerType',typeLabel&&`Tipo: ${typeLabel}`], ['status',f.status!=='todos'&&`Status: ${f.status}`],
     ['segmento',f.segmento!=='todos'&&`Segmento: ${f.segmento}`], ['cidade',f.cidade!=='todos'&&`Local: ${f.cidade}`],
-    ['folderId',folder&&`Pasta: ${folder.nome}`], ['archive',f.archive==='arquivadas'?'Arquivadas':f.archive==='todas'?'Ativas e arquivadas':''],
+    ['folderId',f.folderId==='sem_pasta'?'Sem pasta':folder&&`Pasta: ${folder.nome}`], ['archive',f.archive==='arquivadas'?'Arquivadas':f.archive==='todas'?'Ativas e arquivadas':''],
   ];
   return values.filter(item=>item[1]);
 }
@@ -1556,6 +1591,7 @@ function renderOportunidades(){
   const start=(f.page-1)*pageSize, visible=list.slice(start,start+pageSize);
   const chips=opportunityFilterChips(f);
   const activeTotal=activeCompanies().length;
+  const withoutFolderTotal=activeCompanies().filter(c=>!(c.folderIds||[]).length).length;
   const archivedTotal=state.companies.length-activeTotal;
   const currentFolder=state.folders.find(folder=>folder.id===f.folderId);
 
@@ -1575,6 +1611,7 @@ function renderOportunidades(){
 
   <div class="folder-strip" aria-label="Visualizações de oportunidades">
     <button class="folder-view ${f.folderId==='todos'&&f.archive==='ativas'?'active':''}" data-folder-view="todos" data-archive-view="ativas">Todas <span class="folder-count">${activeTotal}</span></button>
+    <button class="folder-view ${f.folderId==='sem_pasta'&&f.archive==='ativas'?'active':''}" data-folder-view="sem_pasta" data-archive-view="ativas">Sem pasta <span class="folder-count">${withoutFolderTotal}</span></button>
     ${state.folders.map(folder=>`<button class="folder-view ${f.folderId===folder.id&&f.archive==='ativas'?'active':''}" data-folder-view="${folder.id}" data-archive-view="ativas" style="--folder-color:${esc(folder.cor)}"><span class="folder-dot"></span>${esc(folder.nome)} <span class="folder-count">${folderCompanyCount(folder.id)}</span></button>`).join('')}
     <button class="folder-view ${f.archive==='arquivadas'?'active':''}" data-folder-view="todos" data-archive-view="arquivadas">Arquivadas <span class="folder-count">${archivedTotal}</span></button>
     <button class="folder-view" id="newOppFolder">＋ Nova pasta</button>
@@ -1589,7 +1626,7 @@ function renderOportunidades(){
     <button class="btn btn-sm" id="openOppFilters">${icon('filter')} Filtros${chips.filter(item=>item[0]!=='search').length?` <span class="badge badge-blue">${chips.filter(item=>item[0]!=='search').length}</span>`:''}</button>
   </div>
   ${chips.filter(item=>item[0]!=='search').length?`<div class="filter-chips">${chips.filter(item=>item[0]!=='search').map(([key,label])=>`<button class="filter-chip" data-clear-filter="${key}">${esc(label)} <span aria-hidden="true">×</span></button>`).join('')}<button class="text-action" id="clearOppFilters">Limpar tudo</button></div>`:''}
-  ${state.selectedOpps.length ? `<div class="bulk-bar"><span class="badge badge-blue">${state.selectedOpps.length} selecionada${state.selectedOpps.length===1?'':'s'}</span><select class="input bulk-select" id="bulkFolder"><option value="">Adicionar a uma pasta…</option>${state.folders.map(folder=>`<option value="${folder.id}">${esc(folder.nome)}</option>`).join('')}</select><button class="btn btn-sm" id="bulkAddFolder" ${state.folders.length?'':'disabled'}>Adicionar</button>${currentFolder?`<button class="btn btn-sm" id="bulkRemoveFolder">Remover desta pasta</button>`:''}<span style="flex:1"></span><button class="btn btn-sm" id="bulkReanalyze">Reanalisar</button><button class="btn btn-sm" id="bulkMonitor">Monitorar</button><button class="btn btn-sm" id="bulkStatus">Priorizar</button><button class="btn btn-sm" id="bulkArchive">${f.archive==='arquivadas'?'Desarquivar':'Arquivar'}</button><button class="btn btn-sm btn-danger" id="bulkDelete">Excluir</button></div>` : ''}
+  ${state.selectedOpps.length ? `<div class="bulk-bar"><span class="badge badge-blue">${state.selectedOpps.length} selecionada${state.selectedOpps.length===1?'':'s'}</span><select class="input bulk-select" id="bulkFolder"><option value="">Adicionar a uma pasta…</option>${state.folders.map(folder=>`<option value="${folder.id}">${esc(folder.nome)}</option>`).join('')}</select><button class="btn btn-sm" id="bulkAddFolder" ${state.folders.length?'':'disabled'}>Adicionar</button>${currentFolder?`<button class="btn btn-sm" id="bulkRemoveFolder">Remover desta pasta</button>`:''}<span style="flex:1"></span><button class="btn btn-sm" id="bulkReanalyze">Reanalisar</button><button class="btn btn-sm" id="bulkMonitor">Monitorar</button><button class="btn btn-sm" id="bulkStatus">Priorizar</button><button class="btn btn-sm" id="bulkArchive">${f.archive==='arquivadas'?'Desarquivar':'Arquivar'}</button></div>` : ''}
 
   ${state.oppFilterOpen?`
     <div class="filter-scrim" id="closeOppFilters"></div>
@@ -1600,7 +1637,7 @@ function renderOportunidades(){
         <div class="filter-section"><div class="filter-section-title">Data da análise</div><div class="filter-grid-2"><div><label class="label">De</label><input class="input" type="date" id="fAnalyzedFrom" value="${esc(f.analyzedFrom)}"></div><div><label class="label">Até</label><input class="input" type="date" id="fAnalyzedTo" value="${esc(f.analyzedTo)}"></div></div></div>
         <div class="filter-section"><div class="filter-section-title">Qualificação</div><div class="filter-grid-2"><div><label class="label">Score mínimo</label><input class="input" type="number" min="0" max="100" id="fScoreMin" value="${esc(f.scoreMin)}" placeholder="0"></div><div><label class="label">Score máximo</label><input class="input" type="number" min="0" max="100" id="fScoreMax" value="${esc(f.scoreMax)}" placeholder="100"></div><div><label class="label">Potencial</label><select class="input" id="fPotencial"><option value="todos" ${f.potencial==='todos'?'selected':''}>Todos</option><option value="alto" ${f.potencial==='alto'?'selected':''}>Alto</option><option value="medio" ${f.potencial==='medio'?'selected':''}>Médio</option><option value="baixo" ${f.potencial==='baixo'?'selected':''}>Baixo</option></select></div><div><label class="label">Status</label><select class="input" id="fStatus"><option value="todos" ${f.status==='todos'?'selected':''}>Todos</option>${statusOptions.map(s=>`<option value="${esc(s)}" ${f.status===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div></div></div>
         <div class="filter-section"><div class="filter-section-title">Oferta e perfil</div><div class="field"><label class="label">Produto recomendado</label><select class="input" id="fOffer"><option value="todos">Todos</option>${state.offers.filter(o=>o.ativo).map(o=>`<option value="${o.id}" ${f.offerId===o.id?'selected':''}>${esc(o.nome)}</option>`).join('')}</select></div><div class="filter-grid-2"><div><label class="label">Tipo de oferta</label><select class="input" id="fOfferType"><option value="todos">Todos</option>${Object.entries(OFFER_TYPES).map(([key,label])=>`<option value="${key}" ${f.offerType===key?'selected':''}>${label}</option>`).join('')}</select></div><div><label class="label">Segmento</label><select class="input" id="fSegmento"><option value="todos">Todos</option>${segments.map(s=>`<option value="${esc(s)}" ${f.segmento===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div></div><div class="field" style="margin-top:10px;"><label class="label">Cidade ou região</label><select class="input" id="fCidade"><option value="todos">Todas</option>${cities.map(s=>`<option value="${esc(s)}" ${f.cidade===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div></div>
-        <div class="filter-section"><div class="filter-section-title">Organização</div><div class="field"><label class="label">Pasta</label><select class="input" id="fFolder"><option value="todos">Todas as pastas</option>${state.folders.map(folder=>`<option value="${folder.id}" ${f.folderId===folder.id?'selected':''}>${esc(folder.nome)}</option>`).join('')}</select></div><label class="label">Arquivamento</label><select class="input" id="fArchive"><option value="ativas" ${f.archive==='ativas'?'selected':''}>Somente ativas</option><option value="arquivadas" ${f.archive==='arquivadas'?'selected':''}>Somente arquivadas</option><option value="todas" ${f.archive==='todas'?'selected':''}>Ativas e arquivadas</option></select></div>
+        <div class="filter-section"><div class="filter-section-title">Organização</div><div class="field"><label class="label">Pasta</label><select class="input" id="fFolder"><option value="todos">Todas as pastas</option><option value="sem_pasta" ${f.folderId==='sem_pasta'?'selected':''}>Sem pasta</option>${state.folders.map(folder=>`<option value="${folder.id}" ${f.folderId===folder.id?'selected':''}>${esc(folder.nome)}</option>`).join('')}</select></div><label class="label">Arquivamento</label><select class="input" id="fArchive"><option value="ativas" ${f.archive==='ativas'?'selected':''}>Somente ativas</option><option value="arquivadas" ${f.archive==='arquivadas'?'selected':''}>Somente arquivadas</option><option value="todas" ${f.archive==='todas'?'selected':''}>Ativas e arquivadas</option></select></div>
         <div class="filter-section"><div class="filter-section-title">Exibição</div><label class="label">Resultados por página</label><select class="input" id="fPageSize">${[10,20,50].map(n=>`<option value="${n}" ${Number(f.pageSize)===n?'selected':''}>${n} empresas</option>`).join('')}</select></div>
       </div>
       <div class="filter-drawer-footer"><button class="btn" id="clearOppFiltersDrawer">Limpar filtros</button><button class="btn btn-primary" style="flex:1" id="applyOppFilters">Aplicar filtros</button></div>
@@ -1714,7 +1751,9 @@ function renderDiagnostico(){
   const idFromRoute = (state.route||'').split('/')[2] || null;
   const id = idFromRoute || currentDiagId || (state.companies[0] && state.companies[0].id);
   currentDiagId = id;
-  const c = state.companies.find(x=>x.id===id) || state.companies[0];
+  const selectedCompany=state.companies.find(x=>x.id===id);
+  const c = state.companies.find(x=>x.id===selectedCompany?.mergedInto) || selectedCompany || state.companies[0];
+  if(c) currentDiagId=c.id;
   if(!c){
     return `<div class="card empty">${icon('stetho')}<h4>Empresa não encontrada</h4><p>Volte para oportunidades e selecione uma empresa.</p><button class="btn btn-primary" data-nav="#/oportunidades">Ver oportunidades</button></div>`;
   }
@@ -1755,7 +1794,8 @@ function renderDiagnostico(){
     </div>
   </div>
 
-  ${duplicates.length?`<div class="verification-note" style="margin-bottom:18px;"><b>Possíveis duplicidades</b><p>Um dado em comum pode pertencer a filiais ou empresas do mesmo grupo. Revise antes de arquivar; nenhum registro será mesclado ou excluído automaticamente.</p>${duplicates.slice(0,10).map(item=>`<div class="row between wrap" style="gap:8px;margin:8px 0;"><span>${esc(item.company.nome)} · ${item.reasons.map(esc).join(', ')}</span><button class="btn btn-sm" data-diag="${esc(item.company.id)}">Ver empresa</button></div>`).join('')}</div>`:''}
+  ${duplicates.length?`<div class="verification-note" style="margin-bottom:18px;"><b>Possíveis duplicidades</b><p>Um dado em comum pode pertencer a filiais ou empresas do mesmo grupo. Revise antes de mesclar; nenhum registro será excluído automaticamente.</p>${duplicates.slice(0,10).map(item=>`<div class="row between wrap" style="gap:8px;margin:8px 0;"><span>${esc(item.company.nome)} · ${item.reasons.map(esc).join(', ')}</span><div class="row gap-8"><button class="btn btn-sm" data-diag="${esc(item.company.id)}">Ver empresa</button>${state.isAccountOwner?`<button class="btn btn-sm" data-merge-company="${esc(item.company.id)}">Mesclar neste cadastro</button>`:''}</div></div>`).join('')}</div>`:''}
+  <details class="card" style="margin-bottom:18px;"><summary>Histórico de versões do cadastro</summary><p class="muted">Cada versão registra os dados daquele momento. Cadastros mesclados são preservados e suas versões continuam acessíveis.</p><button class="btn btn-sm" id="loadCompanyVersions">Carregar versões</button><div id="companyVersions"></div></details>
   <div class="grid" style="grid-template-columns:280px 1fr;align-items:start;margin-bottom:18px;">
     <div class="card" style="text-align:center;">
       <div class="card-title" style="text-align:left;">LeadScope Score</div>
@@ -1941,6 +1981,29 @@ async function edgeFunctionErrorMessage(error){
   }
   return message;
 }
+async function teamRequest(body){
+  const {data,error}=await sb.functions.invoke('team-invitations',{body});
+  if(error) throw new Error(await edgeFunctionErrorMessage(error));
+  if(data&&data.error) throw new Error(data.error);
+  return data;
+}
+async function refreshTeamInvites(){
+  const host=document.getElementById('teamInvitationList');
+  if(!host) return;
+  host.textContent='Consultando…';
+  try{
+    const data=await teamRequest({action:'list'});
+    const labels={sending:'Processando',sent:'Aceito pelo serviço de envio',failed:'Falha no envio',accepted:'Aceito',revoked:'Revogado'};
+    host.innerHTML=`<h4>Convites</h4>${(data.invitations||[]).map(item=>`<div class="row between wrap" style="gap:8px;padding:10px 0;border-top:1px solid var(--border);"><span>${esc(item.email)} · ${item.role==='viewer'?'Somente leitura':'Colaborador'} · ${esc(labels[item.status]||item.status)}${new Date(item.expires_at)<new Date()&&!['accepted','revoked'].includes(item.status)?' · Expirado':''}</span><div class="row gap-8">${['sent','failed'].includes(item.status)?`<button class="btn btn-sm" data-invite-action="resend" data-invite-id="${esc(item.id)}">Reenviar</button>`:''}${['sent','failed','sending'].includes(item.status)?`<button class="btn btn-sm" data-invite-action="revoke" data-invite-id="${esc(item.id)}">Revogar</button>`:''}</div></div>`).join('')||'<p>Nenhum convite.</p>'}<h4>Colaboradores</h4>${(data.members||[]).map(item=>`<div class="row between wrap" style="padding:10px 0;"><span>${esc(item.email)} · ${item.role==='viewer'?'Somente leitura':'Colaborador'}</span><button class="btn btn-sm" data-invite-action="remove_member" data-member-id="${esc(item.member_id)}">Remover acesso</button></div>`).join('')||'<p>Nenhum colaborador.</p>'}`;
+    host.querySelectorAll('[data-invite-action]').forEach(button=>button.onclick=async()=>{
+      const action=button.dataset.inviteAction;
+      if(action!=='resend'&&!confirm('Confirma revogar este convite ou acesso?')) return;
+      button.disabled=true;
+      try{await teamRequest({action,id:button.dataset.inviteId,member_id:button.dataset.memberId});await refreshTeamInvites();}
+      catch(error){toast(error.message);button.disabled=false;}
+    });
+  }catch(error){host.textContent=error.message;}
+}
 async function reanalyzeOpportunities(companyIds,button){
   const ids=Array.isArray(companyIds)?[...new Set(companyIds.filter(Boolean))]:[];
   if(button){ button.disabled=true; button.dataset.originalText=button.textContent; button.textContent='Reanalisando…'; }
@@ -2049,6 +2112,23 @@ function bindDiagnostico(){
   }
   const validateCnpjBtn=document.getElementById('validateCnpjBtn');
   if(validateCnpjBtn) validateCnpjBtn.addEventListener('click',validateCompanyCnpj);
+  const versionsButton=document.getElementById('loadCompanyVersions');
+  if(versionsButton) versionsButton.onclick=async()=>{
+    const ids=state.companies.filter(c=>c.id===currentDiagId||c.mergedInto===currentDiagId).map(c=>c.id);
+    const host=document.getElementById('companyVersions');versionsButton.disabled=true;
+    const {data,error}=await sb.from('company_versions').select('empresa_id,snapshot,captured_at,changed_by').in('empresa_id',ids).order('captured_at',{ascending:false}).limit(30);
+    versionsButton.disabled=false;
+    if(error){host.textContent='Histórico indisponível. Aplique os SQLs de instalação.';return;}
+    host.innerHTML=(data||[]).map(version=>`<div style="padding:10px 0;border-top:1px solid var(--border);"><b>${esc(fmtDateTime(version.captured_at))}</b><div>${esc(version.snapshot.nome)} · ${esc(version.snapshot.status||'')} · Score ${esc(version.snapshot.score)} · ${esc(version.snapshot.servico_recomendado||'Sem recomendação')}</div><div class="muted">Registro ${esc(version.empresa_id)} · Autor ${esc(version.changed_by||'Instalação ou sistema')}</div></div>`).join('')||'Nenhuma versão registrada.';
+  };
+  document.querySelectorAll('[data-merge-company]').forEach(button=>button.onclick=async()=>{
+    const source=state.companies.find(c=>c.id===button.dataset.mergeCompany),target=state.companies.find(c=>c.id===currentDiagId);
+    if(!source||!target||!confirm(`Confirma que ${source.nome} e ${target.nome} são o mesmo estabelecimento, e não filiais?\n\nO cadastro ${target.nome} será mantido como principal. O outro será arquivado, com histórico preservado. Esta operação não tem desfazer automático.`)) return;
+    button.disabled=true;
+    const {error}=await sb.rpc('merge_company_records',{p_target:target.id,p_source:source.id});
+    if(error){toast(error.message);button.disabled=false;return;}
+    await loadAllData(state.authUserId);toast('Cadastros vinculados; histórico preservado.');
+  });
   document.querySelectorAll('[data-cnpj-candidate]').forEach(button=>button.addEventListener('click',()=>{
     const input=document.getElementById('companyCnpjInput');
     if(input){ input.value=formatCnpj(button.dataset.cnpjCandidate); input.focus(); toast('CNPJ preenchido. Clique em Validar CNPJ para consultar e comparar a identidade.'); }
@@ -2338,11 +2418,8 @@ function renderConfiguracoes(){
       </div>`).join('');
   } else if(tab==='usuarios'){
     inner = `
-      <div class="table-scroll"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th></th></tr></thead>
-      <tbody>
-      <tr><td>${esc(state.user.nome||'Usuário')}</td><td class="muted">${esc(state.user.email||'—')}</td><td><span class="badge badge-blue">${state.user.isPlatformAdmin?'Administrador da plataforma':'Administrador da conta'}</span></td><td></td></tr>
-      <tr><td class="muted">Convidar novo usuário</td><td class="muted">—</td><td class="muted">—</td><td><button class="btn btn-sm">Convidar</button></td></tr>
-      </tbody></table></div>`;
+      <p>${esc(state.user.email||'')} · ${state.isAccountOwner?'Titular da conta':'Colaborador'}</p>
+      ${state.isAccountOwner?`<div class="row gap-8 wrap"><input class="input" id="inviteEmail" type="email" placeholder="E-mail do colaborador" style="max-width:300px;"><select class="input" id="inviteRole" style="max-width:200px;"><option value="editor">Colaborador</option><option value="viewer">Somente leitura</option></select><button class="btn btn-primary" id="sendTeamInvite">Convidar</button><button class="btn" id="refreshTeamInvites">Atualizar lista</button></div><p class="muted">O convite expira em 7 dias. Colaboradores não se tornam administradores da plataforma.</p><div id="teamInvitationList">Clique em Atualizar lista para consultar convites e colaboradores.</div>`:'Somente o titular pode gerenciar colaboradores e convites.'}`;
   } else if(tab==='integracoes'&&isPlatformAdmin){
     inner = `
       <div class="badge badge-blue" style="display:inline-flex;margin-bottom:12px;">Acesso exclusivo do administrador da plataforma</div>
@@ -2555,15 +2632,6 @@ function bindOportunidades(){
     ids.forEach(id=>{ const company=state.companies.find(item=>item.id===id); if(company) company.archivedAt=archivedAt; });
     state.selectedOpps=[]; render(); toast(ids.length+' empresa'+(ids.length===1?'':'s')+' '+(restoring?'restaurada'+(ids.length===1?'':'s'):'arquivada'+(ids.length===1?'':'s'))+'.');
   });
-  const removeCompanies=document.getElementById('bulkDelete');
-  if(removeCompanies) removeCompanies.addEventListener('click',async()=>{
-    const ids=state.selectedOpps.slice();
-    if(!window.confirm(`Excluir permanentemente ${ids.length} empresa${ids.length===1?'':'s'}? Diagnósticos, evidências e vínculos também serão removidos.`)) return;
-    const {error}=await sb.from('empresas').delete().eq('user_id',state.userId).in('id',ids);
-    if(error){ toast('Sem permissão para excluir estas empresas.'); return; }
-    state.companies=state.companies.filter(company=>!ids.includes(company.id));
-    state.selectedOpps=[]; render(); toast(ids.length+' empresa'+(ids.length===1?' excluída':'s excluídas')+'.');
-  });
 }
 function bindResultados(){
   document.querySelectorAll('[data-result]').forEach(sel=>{
@@ -2581,6 +2649,14 @@ function bindResultados(){
   });
 }
 function bindConfiguracoes(){
+  const invite=document.getElementById('sendTeamInvite');
+  if(invite) invite.onclick=async()=>{
+    invite.disabled=true;
+    try{ const result=await teamRequest({action:'invite',email:document.getElementById('inviteEmail').value,role:document.getElementById('inviteRole').value});toast(result.message);await refreshTeamInvites(); }
+    catch(error){toast(error.message);}finally{if(document.body.contains(invite)) invite.disabled=false;}
+  };
+  const refresh=document.getElementById('refreshTeamInvites');
+  if(refresh) refresh.onclick=refreshTeamInvites;
   document.querySelectorAll('[data-configtab]').forEach(el=>{
     el.addEventListener('click', ()=>{ setState({configTab: el.getAttribute('data-configtab')}); });
   });
@@ -2646,11 +2722,12 @@ function bindConfiguracoes(){
       setPath(state, el.getAttribute('data-cfg'), el.value);
     });
     try{
-      await persistSettingsPartial();
+      if(state.configTab!=='perfil') await persistSettingsPartial();
       if(state.userId){
-        await sb.from('profiles').update({nome:state.user.nome, email:state.user.email, cargo:state.user.cargo}).eq('id', state.userId);
+        const {error}=await sb.from('profiles').update({nome:state.user.nome, email:state.user.email, cargo:state.user.cargo}).eq('id', state.authUserId||state.userId);
+        if(error) throw error;
       }
-    }catch(e){ toast('Não foi possível salvar agora.'); }
+    }catch(e){ toast('Não foi possível salvar agora.'); return; }
     render();
     flashButton(document.getElementById('saveConfig'), 'Salvo');
     toast('Configurações salvas com sucesso.');

@@ -1,5 +1,6 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "@supabase/server";
+import { accountId } from "../_shared/account.ts";
 
 type Place = {
   id: string;
@@ -61,7 +62,7 @@ export default {
       const location = cleanText(body.location);
       const limit = Math.max(1, Math.min(20, Number(body.result_limit) || 20));
       if (!radarId || !query || !location) return Response.json({ error: "Radar, segmento e localização são obrigatórios." }, { status: 400 });
-      const userId = ctx.userClaims?.id;
+      const userId = await accountId(ctx);
       if (!userId) return Response.json({ error: "Não foi possível identificar o usuário autenticado." }, { status: 401 });
 
       const { data: radar, error: radarError } = await ctx.supabase.from("radares").select("id").eq("id", radarId).single();
@@ -97,20 +98,20 @@ export default {
         const signals: string[] = [];
         if (!place.websiteUri) signals.push("semSite");
         if (!place.nationalPhoneNumber) signals.push("semWhats");
-        const { data: company, error: companyError } = await ctx.supabase.from("empresas").upsert({
+        const { data: company, error: companyError } = await ctx.supabase.rpc("save_company_collection", { p_payload: {
           user_id: userId, radar_id: radarId, google_place_id: place.id, nome: place.displayName.text,
+          source_provider: "google_maps", source_place_id: place.id, source_url: place.googleMapsUri ?? null, source_payload: place,
           segmento: place.primaryType ?? place.types?.[0] ?? query, cidade: location,
           endereco: place.formattedAddress ?? null, telefone: place.nationalPhoneNumber ?? null,
           site: place.websiteUri ?? null, nota: place.rating ?? null, avaliacoes: place.userRatingCount ?? 0,
-          score: score.total, confianca, potencial, status: "Nova", ultima_atualizacao: new Date().toISOString().slice(0, 10),
+          score: score.total, confianca, potencial, ultima_atualizacao: new Date().toISOString().slice(0, 10),
           servico_recomendado: place.websiteUri ? "Otimização da presença digital e conversão" : "Criação de site e presença digital",
           sinais_keys: signals, business_status: place.businessStatus ?? null, google_maps_url: place.googleMapsUri ?? null,
           latitude: place.location?.latitude ?? null, longitude: place.location?.longitude ?? null,
           dados_google: place, coletado_em: new Date().toISOString(), analisado_em: new Date().toISOString(),
-        }, { onConflict: "user_id,google_place_id" }).select("id,nome,score,potencial").single();
+        } }).single();
         if (companyError) throw companyError;
 
-        await ctx.supabase.from("score_components").delete().eq("empresa_id", company.id).eq("versao_modelo", "google-v1");
         await ctx.supabase.from("score_components").insert([
           ["Perfil Google", score.profile, 20, "Completude e situação pública do perfil."],
           ["Oportunidade", score.opportunity, 25, place.websiteUri ? "Site encontrado; há espaço para otimização." : "Site não encontrado no perfil."],

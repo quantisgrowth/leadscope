@@ -1,5 +1,6 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "@supabase/server";
+import { accountId } from "../_shared/account.ts";
 
 const APIFY_ACTOR = "compass~crawler-google-places";
 const PROVIDER = "apify_google_maps";
@@ -156,7 +157,7 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
     const potential = score.total >= 70 ? "alto" : score.total >= 45 ? "medio" : "baixo";
     const confidence = score.confidence >= 17 ? "Alta" : score.confidence >= 11 ? "Média" : "Baixa";
 
-    const { data: company, error: companyError } = await ctx.supabase.from("empresas").upsert({
+    const { data: company, error: companyError } = await ctx.supabase.rpc("save_company_collection", { p_payload: {
       user_id: run.user_id,
       radar_id: run.radar_id,
       source_provider: "google_maps",
@@ -177,7 +178,6 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
       score: score.total,
       confianca: confidence,
       potencial: potential,
-      status: "Nova",
       ultima_atualizacao: collectedAt.slice(0, 10),
       servico_recomendado: recommendation?.offer.nome ?? null,
       sinais_keys: signals,
@@ -186,20 +186,17 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
       longitude: place.location?.lng ?? null,
       coletado_em: collectedAt,
       analisado_em: collectedAt,
-    }, { onConflict: "user_id,source_provider,source_place_id" }).select("id,nome,score,potencial").single();
+    } }).single();
     if (companyError) throw companyError;
 
     if (offerMatches.length) {
-      const { error: deleteMatchError } = await ctx.supabase.from("company_offer_matches").delete().eq("empresa_id", company.id).eq("radar_id", run.radar_id);
-      if (deleteMatchError) throw deleteMatchError;
       const { error: matchError } = await ctx.supabase.from("company_offer_matches").insert(offerMatches.map((match, index) => ({
         user_id: run.user_id, empresa_id: company.id, radar_id: run.radar_id, offer_id: match.offer.id,
-        compatibilidade: match.compatibility, motivo: match.reason, principal: index === 0,
+        compatibilidade: match.compatibility, motivo: match.reason, principal: index === 0, analysis_batch: collectedAt,
       })));
       if (matchError) throw matchError;
     }
 
-    await ctx.supabase.from("score_components").delete().eq("empresa_id", company.id).in("versao_modelo", ["apify-google-v1", "offer-fit-v2"]);
     const { error: scoreError } = await ctx.supabase.from("score_components").insert([
       ["Perfil comercial público", score.profile, 20, "Completude e situação pública do estabelecimento na fonte consultada."],
       ["Compatibilidade com a oferta", score.compatibility, 30, recommendation ? recommendation.reason : "Nenhuma oferta foi vinculada ao radar; compatibilidade ainda não avaliada."],
@@ -208,7 +205,7 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
       ["Confiança", score.confidence, 20, "Quantidade de campos públicos verificáveis coletados."],
     ].map(([dimensao, pontos, maximo, explicacao]) => ({
       user_id: run.user_id, empresa_id: company.id, radar_run_id: run.id,
-      versao_modelo: "offer-fit-v2", dimensao, pontos, maximo, explicacao,
+      versao_modelo: "offer-fit-v2", dimensao, pontos, maximo, explicacao, calculado_em: collectedAt,
     })));
     if (scoreError) throw scoreError;
 
@@ -258,7 +255,7 @@ export default {
     try {
       const body = await req.json();
       const action = body.action === "status" ? "status" : "start";
-      const userId = ctx.userClaims?.id;
+      const userId = await accountId(ctx);
       if (!userId) return Response.json({ error: "Não foi possível identificar o usuário autenticado." }, { status: 401 });
 
       if (action === "start") {

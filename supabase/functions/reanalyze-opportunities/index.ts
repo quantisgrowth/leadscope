@@ -1,5 +1,6 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "@supabase/server";
+import { accountId } from "../_shared/account.ts";
 
 type Offer = {
   id: string;
@@ -100,10 +101,7 @@ async function reanalyzeCompany(ctx: any, company: Company, offers: Offer[]) {
   const potential = score.total >= 70 ? "alto" : score.total >= 45 ? "medio" : "baixo";
   const confidence = score.confidence >= 17 ? "Alta" : score.confidence >= 11 ? "Média" : "Baixa";
 
-  const { error: deleteMatchError } = await ctx.supabase.from("company_offer_matches").delete().eq("empresa_id", company.id);
-  if (deleteMatchError) throw deleteMatchError;
-  if (matches.length) {
-    const { error: matchError } = await ctx.supabase.from("company_offer_matches").insert(matches.map((match, index) => ({
+  const matchRows = matches.map((match, index) => ({
       user_id: company.user_id,
       empresa_id: company.id,
       radar_id: company.radar_id,
@@ -111,13 +109,10 @@ async function reanalyzeCompany(ctx: any, company: Company, offers: Offer[]) {
       compatibilidade: match.compatibility,
       motivo: match.reason,
       principal: index === 0,
-    })));
-    if (matchError) throw matchError;
-  }
+      analysis_batch: analyzedAt,
+    }));
 
-  const { error: deleteScoreError } = await ctx.supabase.from("score_components").delete().eq("empresa_id", company.id).in("versao_modelo", ["apify-google-v1", "offer-fit-v2", "offer-reanalysis-v3"]);
-  if (deleteScoreError) throw deleteScoreError;
-  const { error: scoreError } = await ctx.supabase.from("score_components").insert([
+  const componentRows = [
     ["Perfil comercial público", score.profile, 20, "Completude e situação pública do estabelecimento na fonte consultada."],
     ["Compatibilidade com a oferta", score.compatibility, 30, recommendation ? recommendation.reason : "Nenhuma oferta ativa foi encontrada; compatibilidade ainda não avaliada."],
     ["Reputação", score.reputation, 15, "Nota e volume de avaliações na fonte pública consultada."],
@@ -133,16 +128,15 @@ async function reanalyzeCompany(ctx: any, company: Company, offers: Offer[]) {
     maximo,
     explicacao,
     calculado_em: analyzedAt,
-  })));
-  if (scoreError) throw scoreError;
+  }));
 
-  const { error: companyError } = await ctx.supabase.from("empresas").update({
+  const { error: companyError } = await ctx.supabase.rpc('save_company_analysis',{p_company:company.id,p_matches:matchRows,p_components:componentRows,p_update:{
     score: score.total,
     confianca: confidence,
     potencial: potential,
     servico_recomendado: recommendation?.offer.nome ?? null,
     analisado_em: analyzedAt,
-  }).eq("id", company.id);
+  }});
   if (companyError) throw companyError;
 }
 
@@ -150,7 +144,7 @@ export default {
   fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
     if (req.method !== "POST") return Response.json({ error: "Método não permitido" }, { status: 405 });
     try {
-      const userId = ctx.userClaims?.id;
+      const userId = await accountId(ctx);
       if (!userId) return Response.json({ error: "Não foi possível identificar o usuário autenticado." }, { status: 401 });
       const body = await req.json().catch(() => ({}));
       const requestedIds = Array.isArray(body.company_ids) ? [...new Set(body.company_ids.map((value: unknown) => cleanText(value, 64)).filter(Boolean))] : [];

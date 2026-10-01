@@ -1,5 +1,7 @@
 # LeadScope
 
+> Atualização de histórico e convites: siga [o guia de instalação](docs/INSTALACAO_ATUALIZACAO.md). Os SQLs e as funções desta entrega ainda precisam ser instalados no Supabase pelo responsável do projeto; publicar o HTML não ativa o envio de e-mail.
+
 Plataforma de inteligência comercial para agências, prestadores de serviços e pequenas empresas de software. O primeiro estágio transforma buscas em bases públicas de estabelecimentos em oportunidades explicáveis, com evidências e score.
 
 ## O que esta versão entrega
