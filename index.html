@@ -188,6 +188,12 @@ tr.row-hover:hover{background:var(--hover);}
 .filter-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:999px;padding:5px 9px;font:inherit;font-size:12px;cursor:pointer;max-width:260px;}
 .filter-chip:hover{background:var(--hover);}
 .bulk-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;margin-bottom:14px;border:1px solid color-mix(in srgb,var(--blue) 35%,var(--border));background:color-mix(in srgb,var(--blue) 8%,var(--card));border-radius:12px;}
+.folder-strip{display:flex;align-items:center;gap:7px;overflow-x:auto;padding:2px 0 12px;margin-bottom:2px;scrollbar-width:thin;}
+.folder-view{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:6px 10px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--text-secondary);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.folder-view:hover{background:var(--hover);color:var(--text);}.folder-view.active{border-color:var(--blue);color:var(--blue-light);background:color-mix(in srgb,var(--blue) 10%,var(--card));}
+.folder-dot{width:8px;height:8px;border-radius:50%;background:var(--folder-color,var(--blue));flex:0 0 auto;}.folder-count{font-size:11px;color:var(--text-secondary);}
+.bulk-select{min-width:170px;max-width:230px;padding:7px 9px;font-size:12.5px;}
+.btn-danger{color:var(--error);border-color:color-mix(in srgb,var(--error) 42%,var(--border));}.btn-danger:hover{background:color-mix(in srgb,var(--error) 10%,transparent);border-color:var(--error);}
 .filter-scrim{position:fixed;inset:0;background:var(--scrim);z-index:110;animation:fadein .15s ease;}
 .filter-drawer{position:fixed;right:0;top:0;bottom:0;width:min(440px,94vw);background:var(--bg);border-left:1px solid var(--border);z-index:120;display:flex;flex-direction:column;box-shadow:var(--shadow);animation:drawerIn .2s ease;}
 .filter-drawer-head{padding:20px 20px 15px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
@@ -388,7 +394,7 @@ function formatOfferPrice(offer){
 }
 
 // Converte uma linha da tabela `empresas` (+ suas `evidencias`) no formato que as telas usam.
-function rowToCompany(row, evidenciaRows, latestAudit, offerMatch){
+function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds){
   const rawSignals = sinaisFromKeys(row.sinais_keys);
   const sourceLabel=row.source_provider==='google_maps'?'Google Maps via Apify':'Fonte pública';
   if(!rawSignals.length) rawSignals.push({key:'perfilPublico', texto:'Estabelecimento localizado em uma fonte pública', fonte:sourceLabel, interpretacao:'Há dados públicos suficientes para iniciar uma qualificação comercial', servico:4});
@@ -424,6 +430,8 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch){
     ultimaAtualizacao: row.ultima_atualizacao ? fmtDate(new Date(row.ultima_atualizacao+'T00:00:00')) : '',
     resultado: row.resultado,
     monitorada: !!row.monitorada,
+    archivedAt:row.archived_at||null,
+    folderIds:folderIds||[],
     mensagemGerada: row.mensagem_gerada, mensagemTom: row.mensagem_tom || 'consultivo', mensagemUtilizada: !!row.mensagem_utilizada,
     perfil:{
       categoria:row.segmento || 'Não informada', horarios:formatOpeningHours(sourcePayload),
@@ -511,7 +519,7 @@ function msgTemplates(c){
 const DEFAULT_OPP_FILTERS = {
   search:'', createdFrom:'', createdTo:'', analyzedFrom:'', analyzedTo:'',
   scoreMin:'', scoreMax:'', potencial:'todos', offerId:'todos', offerType:'todos',
-  status:'todos', segmento:'todos', cidade:'todos', sort:'score_desc', page:1, pageSize:20, view:'tabela',
+  status:'todos', segmento:'todos', cidade:'todos', folderId:'todos', archive:'ativas', sort:'score_desc', page:1, pageSize:20, view:'tabela',
 };
 const DEFAULT_UI_PREFS = {
   route:'#/overview', sidebarOpen:false,
@@ -545,7 +553,7 @@ let state = Object.assign({
     segmentosDesejados:'', regiao:'', porte:'Pequeno e médio porte', palavrasChave:'', qtdOportunidades:'20',
     pesos:{ google:70, site:80, reputacao:60, contato:70, presenca:50, compatibilidade:75, urgencia:65 } },
   user:{ nome:'', empresa:'', plano:'Plano Piloto', email:'', cargo:'Head Comercial' },
-  companies: [],
+  companies: [], folders:[],
   radars: [],
   offers: [], offerEditor:null,
   selectedOpps:[], oppFilterOpen:false,
@@ -564,7 +572,7 @@ const setPath = setPathLocal;
 
 /* ================= SUPABASE: CARREGAR / GRAVAR DADOS ================= */
 async function loadAllData(userId){
-  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}, {data:siteAuditRows}, {data:offerRows}, {data:offerMatchRows}] = await Promise.all([
+  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}, {data:siteAuditRows}, {data:offerRows}, {data:offerMatchRows}, {data:folderRows}, {data:folderLinkRows}] = await Promise.all([
     sb.from('profiles').select('*').eq('id', userId).maybeSingle(),
     sb.from('account_settings').select('*').eq('user_id', userId).maybeSingle(),
     sb.from('radares').select('*').eq('user_id', userId).order('criado_em', {ascending:false}),
@@ -573,6 +581,8 @@ async function loadAllData(userId){
     sb.from('site_audits').select('*').eq('user_id', userId).order('created_at', {ascending:false}),
     sb.from('offers').select('*').eq('user_id', userId).order('posicao', {ascending:true}),
     sb.from('company_offer_matches').select('*,offer:offers(*)').eq('user_id', userId).eq('principal', true).order('compatibilidade', {ascending:false}),
+    sb.from('opportunity_folders').select('*').eq('user_id', userId).order('updated_at', {ascending:false}),
+    sb.from('opportunity_folder_companies').select('folder_id,empresa_id').eq('user_id', userId),
   ]);
   const evByEmpresa = {};
   (evidenciasRows||[]).forEach(e=>{ (evByEmpresa[e.empresa_id] = evByEmpresa[e.empresa_id]||[]).push(e); });
@@ -587,7 +597,9 @@ async function loadAllData(userId){
     if(match.offer) match.offer=rowToOffer(match.offer);
     if(!matchByEmpresa[match.empresa_id]) matchByEmpresa[match.empresa_id]=match;
   });
-  const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id], latestAuditByEmpresa[row.id], matchByEmpresa[row.id]));
+  const foldersByCompany={};
+  (folderLinkRows||[]).forEach(link=>{ (foldersByCompany[link.empresa_id]=foldersByCompany[link.empresa_id]||[]).push(link.folder_id); });
+  const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id], latestAuditByEmpresa[row.id], matchByEmpresa[row.id], foldersByCompany[row.id]));
   const ob = rowToOnboarding(settings) || state.onboarding;
   setState({
     userId,
@@ -598,6 +610,7 @@ async function loadAllData(userId){
     onboarded: !!(settings && settings.onboarded),
     onboardStep: Math.max(1, Math.min(3, Number((settings&&settings.onboarding_step)||1))),
     companies,
+    folders:(folderRows||[]).map(folder=>({id:folder.id,nome:folder.nome,cor:folder.cor||'#10a37f'})),
     offers:(offerRows||[]).map(rowToOffer),
     radars: (radaresRows||[]).map(r=>({id:r.id, nome:r.nome, segmento:r.segmento, cidade:r.cidade, query:r.query, localizacao:r.localizacao, status:r.status||'pendente', criadoEm: r.criado_em ? fmtDate(new Date(r.criado_em+'T00:00:00')) : ''})),
     loggedIn:true, booting:false,
@@ -1375,9 +1388,14 @@ function companyOffer(c){
   if(c.offerRecommendation&&c.offerRecommendation.offer) return c.offerRecommendation.offer;
   return state.offers.find(offer=>offer.nome===c.servicoRecomendado)||null;
 }
+function activeCompanies(){ return state.companies.filter(company=>!company.archivedAt); }
+function folderCompanyCount(folderId){ return activeCompanies().filter(company=>(company.folderIds||[]).includes(folderId)).length; }
 function opportunityDataset(){
   const f=state.oppFilters;
   let list=state.companies.slice();
+  if(f.archive==='ativas') list=list.filter(c=>!c.archivedAt);
+  else if(f.archive==='arquivadas') list=list.filter(c=>!!c.archivedAt);
+  if(f.folderId!=='todos') list=list.filter(c=>(c.folderIds||[]).includes(f.folderId));
   const query=normalizedText(f.search);
   if(query) list=list.filter(c=>normalizedText([c.nome,c.segmento,companyLocation(c),c.servicoRecomendado].join(' ')).includes(query));
   if(f.potencial!=='todos') list=list.filter(c=>c.potencial===f.potencial);
@@ -1403,6 +1421,7 @@ function opportunityDataset(){
 }
 function opportunityFilterChips(f){
   const offer=state.offers.find(item=>item.id===f.offerId);
+  const folder=state.folders.find(item=>item.id===f.folderId);
   const typeLabel=OFFER_TYPES[f.offerType];
   const values=[
     ['search',f.search&&`Busca: ${f.search}`], ['createdFrom',f.createdFrom&&`Criada desde ${f.createdFrom.split('-').reverse().join('/')}`],
@@ -1411,6 +1430,7 @@ function opportunityFilterChips(f){
     ['scoreMax',f.scoreMax!==''&&`Score máximo ${f.scoreMax}`], ['potencial',f.potencial!=='todos'&&`Potencial: ${f.potencial}`],
     ['offerId',offer&&`Produto: ${offer.nome}`], ['offerType',typeLabel&&`Tipo: ${typeLabel}`], ['status',f.status!=='todos'&&`Status: ${f.status}`],
     ['segmento',f.segmento!=='todos'&&`Segmento: ${f.segmento}`], ['cidade',f.cidade!=='todos'&&`Local: ${f.cidade}`],
+    ['folderId',folder&&`Pasta: ${folder.nome}`], ['archive',f.archive==='arquivadas'?'Arquivadas':f.archive==='todas'?'Ativas e arquivadas':''],
   ];
   return values.filter(item=>item[1]);
 }
@@ -1425,18 +1445,29 @@ function renderOportunidades(){
   f.page=Math.min(Math.max(1,Number(f.page)||1),pages);
   const start=(f.page-1)*pageSize, visible=list.slice(start,start+pageSize);
   const chips=opportunityFilterChips(f);
+  const activeTotal=activeCompanies().length;
+  const archivedTotal=state.companies.length-activeTotal;
+  const currentFolder=state.folders.find(folder=>folder.id===f.folderId);
 
   return `
   <div class="row between wrap" style="margin-bottom:4px;">
     <div>
       <h1 class="page-title">Oportunidades</h1>
-      <p class="page-sub">${list.length} de ${state.companies.length} empresas · página ${f.page} de ${pages}</p>
+      <p class="page-sub">${list.length} oportunidade${list.length===1?'':'s'} nesta visualização · página ${f.page} de ${pages}</p>
     </div>
     <div class="row gap-8">
       <button class="btn btn-sm ${f.view==='tabela'?'btn-primary':''}" id="viewTabela">Tabela</button>
       <button class="btn btn-sm ${f.view==='cards'?'btn-primary':''}" id="viewCards">Cards</button>
       <button class="btn btn-sm" id="exportCsv">${icon('dl')} Exportar CSV</button>
     </div>
+  </div>
+
+  <div class="folder-strip" aria-label="Visualizações de oportunidades">
+    <button class="folder-view ${f.folderId==='todos'&&f.archive==='ativas'?'active':''}" data-folder-view="todos" data-archive-view="ativas">Todas <span class="folder-count">${activeTotal}</span></button>
+    ${state.folders.map(folder=>`<button class="folder-view ${f.folderId===folder.id&&f.archive==='ativas'?'active':''}" data-folder-view="${folder.id}" data-archive-view="ativas" style="--folder-color:${esc(folder.cor)}"><span class="folder-dot"></span>${esc(folder.nome)} <span class="folder-count">${folderCompanyCount(folder.id)}</span></button>`).join('')}
+    <button class="folder-view ${f.archive==='arquivadas'?'active':''}" data-folder-view="todos" data-archive-view="arquivadas">Arquivadas <span class="folder-count">${archivedTotal}</span></button>
+    <button class="folder-view" id="newOppFolder">＋ Nova pasta</button>
+    ${currentFolder?`<button class="folder-view" id="renameOppFolder" title="Renomear pasta">Renomear</button><button class="folder-view btn-danger" id="deleteOppFolder" title="Excluir apenas a pasta">Excluir pasta</button>`:''}
   </div>
 
   <div class="card opp-toolbar">
@@ -1447,7 +1478,7 @@ function renderOportunidades(){
     <button class="btn btn-sm" id="openOppFilters">${icon('filter')} Filtros${chips.filter(item=>item[0]!=='search').length?` <span class="badge badge-blue">${chips.filter(item=>item[0]!=='search').length}</span>`:''}</button>
   </div>
   ${chips.filter(item=>item[0]!=='search').length?`<div class="filter-chips">${chips.filter(item=>item[0]!=='search').map(([key,label])=>`<button class="filter-chip" data-clear-filter="${key}">${esc(label)} <span aria-hidden="true">×</span></button>`).join('')}<button class="text-action" id="clearOppFilters">Limpar tudo</button></div>`:''}
-  ${state.selectedOpps.length ? `<div class="bulk-bar"><span class="badge badge-blue">${state.selectedOpps.length} selecionadas</span><span style="flex:1"></span><button class="btn btn-sm" id="bulkMonitor">Marcar para monitoramento</button><button class="btn btn-sm" id="bulkStatus">Marcar como Priorizada</button></div>` : ''}
+  ${state.selectedOpps.length ? `<div class="bulk-bar"><span class="badge badge-blue">${state.selectedOpps.length} selecionada${state.selectedOpps.length===1?'':'s'}</span><select class="input bulk-select" id="bulkFolder"><option value="">Adicionar a uma pasta…</option>${state.folders.map(folder=>`<option value="${folder.id}">${esc(folder.nome)}</option>`).join('')}</select><button class="btn btn-sm" id="bulkAddFolder" ${state.folders.length?'':'disabled'}>Adicionar</button>${currentFolder?`<button class="btn btn-sm" id="bulkRemoveFolder">Remover desta pasta</button>`:''}<span style="flex:1"></span><button class="btn btn-sm" id="bulkMonitor">Monitorar</button><button class="btn btn-sm" id="bulkStatus">Priorizar</button><button class="btn btn-sm" id="bulkArchive">${f.archive==='arquivadas'?'Desarquivar':'Arquivar'}</button><button class="btn btn-sm btn-danger" id="bulkDelete">Excluir</button></div>` : ''}
 
   ${state.oppFilterOpen?`
     <div class="filter-scrim" id="closeOppFilters"></div>
@@ -1458,6 +1489,7 @@ function renderOportunidades(){
         <div class="filter-section"><div class="filter-section-title">Data da análise</div><div class="filter-grid-2"><div><label class="label">De</label><input class="input" type="date" id="fAnalyzedFrom" value="${esc(f.analyzedFrom)}"></div><div><label class="label">Até</label><input class="input" type="date" id="fAnalyzedTo" value="${esc(f.analyzedTo)}"></div></div></div>
         <div class="filter-section"><div class="filter-section-title">Qualificação</div><div class="filter-grid-2"><div><label class="label">Score mínimo</label><input class="input" type="number" min="0" max="100" id="fScoreMin" value="${esc(f.scoreMin)}" placeholder="0"></div><div><label class="label">Score máximo</label><input class="input" type="number" min="0" max="100" id="fScoreMax" value="${esc(f.scoreMax)}" placeholder="100"></div><div><label class="label">Potencial</label><select class="input" id="fPotencial"><option value="todos" ${f.potencial==='todos'?'selected':''}>Todos</option><option value="alto" ${f.potencial==='alto'?'selected':''}>Alto</option><option value="medio" ${f.potencial==='medio'?'selected':''}>Médio</option><option value="baixo" ${f.potencial==='baixo'?'selected':''}>Baixo</option></select></div><div><label class="label">Status</label><select class="input" id="fStatus"><option value="todos" ${f.status==='todos'?'selected':''}>Todos</option>${statusOptions.map(s=>`<option value="${esc(s)}" ${f.status===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div></div></div>
         <div class="filter-section"><div class="filter-section-title">Oferta e perfil</div><div class="field"><label class="label">Produto recomendado</label><select class="input" id="fOffer"><option value="todos">Todos</option>${state.offers.filter(o=>o.ativo).map(o=>`<option value="${o.id}" ${f.offerId===o.id?'selected':''}>${esc(o.nome)}</option>`).join('')}</select></div><div class="filter-grid-2"><div><label class="label">Tipo de oferta</label><select class="input" id="fOfferType"><option value="todos">Todos</option>${Object.entries(OFFER_TYPES).map(([key,label])=>`<option value="${key}" ${f.offerType===key?'selected':''}>${label}</option>`).join('')}</select></div><div><label class="label">Segmento</label><select class="input" id="fSegmento"><option value="todos">Todos</option>${segments.map(s=>`<option value="${esc(s)}" ${f.segmento===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div></div><div class="field" style="margin-top:10px;"><label class="label">Cidade ou região</label><select class="input" id="fCidade"><option value="todos">Todas</option>${cities.map(s=>`<option value="${esc(s)}" ${f.cidade===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div></div>
+        <div class="filter-section"><div class="filter-section-title">Organização</div><div class="field"><label class="label">Pasta</label><select class="input" id="fFolder"><option value="todos">Todas as pastas</option>${state.folders.map(folder=>`<option value="${folder.id}" ${f.folderId===folder.id?'selected':''}>${esc(folder.nome)}</option>`).join('')}</select></div><label class="label">Arquivamento</label><select class="input" id="fArchive"><option value="ativas" ${f.archive==='ativas'?'selected':''}>Somente ativas</option><option value="arquivadas" ${f.archive==='arquivadas'?'selected':''}>Somente arquivadas</option><option value="todas" ${f.archive==='todas'?'selected':''}>Ativas e arquivadas</option></select></div>
         <div class="filter-section"><div class="filter-section-title">Exibição</div><label class="label">Resultados por página</label><select class="input" id="fPageSize">${[10,20,50].map(n=>`<option value="${n}" ${Number(f.pageSize)===n?'selected':''}>${n} empresas</option>`).join('')}</select></div>
       </div>
       <div class="filter-drawer-footer"><button class="btn" id="clearOppFiltersDrawer">Limpar filtros</button><button class="btn btn-primary" style="flex:1" id="applyOppFilters">Aplicar filtros</button></div>
@@ -2154,8 +2186,40 @@ function bindOportunidades(){
   const filterBindings={
     fCreatedFrom:'createdFrom',fCreatedTo:'createdTo',fAnalyzedFrom:'analyzedFrom',fAnalyzedTo:'analyzedTo',
     fScoreMin:'scoreMin',fScoreMax:'scoreMax',fPotencial:'potencial',fStatus:'status',fOffer:'offerId',
-    fOfferType:'offerType',fSegmento:'segmento',fCidade:'cidade',fSort:'sort',fPageSize:'pageSize',
+    fOfferType:'offerType',fSegmento:'segmento',fCidade:'cidade',fFolder:'folderId',fArchive:'archive',fSort:'sort',fPageSize:'pageSize',
   };
+  document.querySelectorAll('[data-folder-view]').forEach(button=>button.addEventListener('click',()=>{
+    state.oppFilters.folderId=button.getAttribute('data-folder-view')||'todos';
+    state.oppFilters.archive=button.getAttribute('data-archive-view')||'ativas';
+    state.oppFilters.page=1; state.selectedOpps=[]; setState({});
+  }));
+  const newFolder=document.getElementById('newOppFolder');
+  if(newFolder) newFolder.addEventListener('click',async()=>{
+    const name=(window.prompt('Nome da nova pasta:')||'').trim();
+    if(!name) return;
+    const {data,error}=await sb.from('opportunity_folders').insert({user_id:state.userId,nome:name}).select('*').single();
+    if(error){ toast(error.code==='23505'?'Já existe uma pasta com esse nome.':'Não foi possível criar a pasta.'); return; }
+    state.folders.unshift({id:data.id,nome:data.nome,cor:data.cor||'#10a37f'});
+    state.oppFilters.folderId=data.id; state.oppFilters.archive='ativas'; state.oppFilters.page=1; setState({});
+  });
+  const activeFolder=state.folders.find(folder=>folder.id===state.oppFilters.folderId);
+  const renameFolder=document.getElementById('renameOppFolder');
+  if(renameFolder&&activeFolder) renameFolder.addEventListener('click',async()=>{
+    const name=(window.prompt('Novo nome da pasta:',activeFolder.nome)||'').trim();
+    if(!name||name===activeFolder.nome) return;
+    const {error}=await sb.from('opportunity_folders').update({nome:name,updated_at:new Date().toISOString()}).eq('id',activeFolder.id).eq('user_id',state.userId);
+    if(error){ toast(error.code==='23505'?'Já existe uma pasta com esse nome.':'Não foi possível renomear a pasta.'); return; }
+    activeFolder.nome=name; setState({}); toast('Pasta renomeada.');
+  });
+  const deleteFolder=document.getElementById('deleteOppFolder');
+  if(deleteFolder&&activeFolder) deleteFolder.addEventListener('click',async()=>{
+    if(!window.confirm(`Excluir a pasta “${activeFolder.nome}”? As empresas não serão excluídas.`)) return;
+    const {error}=await sb.from('opportunity_folders').delete().eq('id',activeFolder.id).eq('user_id',state.userId);
+    if(error){ toast('Não foi possível excluir a pasta.'); return; }
+    state.folders=state.folders.filter(folder=>folder.id!==activeFolder.id);
+    state.companies.forEach(company=>{ company.folderIds=(company.folderIds||[]).filter(id=>id!==activeFolder.id); });
+    state.oppFilters.folderId='todos'; state.oppFilters.page=1; setState({}); toast('Pasta excluída; as empresas foram preservadas.');
+  });
   const sort=document.getElementById('fSort');
   if(sort) sort.addEventListener('change',()=>{ state.oppFilters.sort=sort.value; state.oppFilters.page=1; setState({}); });
   const search=document.getElementById('fSearch');
@@ -2211,16 +2275,56 @@ function bindOportunidades(){
   const bm = document.getElementById('bulkMonitor');
   if(bm) bm.addEventListener('click', async ()=>{
     const ids = state.selectedOpps.slice();
+    const {error}=await sb.from('empresas').update({monitorada:true}).eq('user_id',state.userId).in('id', ids);
+    if(error){ toast('Não foi possível atualizar o monitoramento.'); return; }
     ids.forEach(id=>{ const c=state.companies.find(x=>x.id===id); if(c) c.monitorada=true; });
     toast(ids.length+' empresas marcadas para monitoramento.'); state.selectedOpps=[]; render();
-    try{ await sb.from('empresas').update({monitorada:true}).in('id', ids); }catch(e){}
   });
   const bs = document.getElementById('bulkStatus');
   if(bs) bs.addEventListener('click', async ()=>{
     const ids = state.selectedOpps.slice();
+    const {error}=await sb.from('empresas').update({status:'Priorizada'}).eq('user_id',state.userId).in('id', ids);
+    if(error){ toast('Não foi possível atualizar o status.'); return; }
     ids.forEach(id=>{ const c=state.companies.find(x=>x.id===id); if(c) c.status='Priorizada'; });
     toast('Status atualizado em massa.'); state.selectedOpps=[]; render();
-    try{ await sb.from('empresas').update({status:'Priorizada'}).in('id', ids); }catch(e){}
+  });
+  const addFolder=document.getElementById('bulkAddFolder');
+  if(addFolder) addFolder.addEventListener('click',async()=>{
+    const folderId=(document.getElementById('bulkFolder')||{}).value;
+    const ids=state.selectedOpps.slice();
+    if(!folderId){ toast('Escolha uma pasta primeiro.'); return; }
+    const rows=ids.map(empresaId=>({user_id:state.userId,folder_id:folderId,empresa_id:empresaId}));
+    const {error}=await sb.from('opportunity_folder_companies').upsert(rows,{onConflict:'folder_id,empresa_id',ignoreDuplicates:true});
+    if(error){ toast('Não foi possível adicionar as empresas à pasta.'); return; }
+    ids.forEach(id=>{ const company=state.companies.find(item=>item.id===id); if(company) company.folderIds=[...new Set([...(company.folderIds||[]),folderId])]; });
+    state.selectedOpps=[]; render(); toast(ids.length+' empresa'+(ids.length===1?' adicionada':'s adicionadas')+' à pasta.');
+  });
+  const removeFolder=document.getElementById('bulkRemoveFolder');
+  if(removeFolder&&activeFolder) removeFolder.addEventListener('click',async()=>{
+    const ids=state.selectedOpps.slice();
+    const {error}=await sb.from('opportunity_folder_companies').delete().eq('user_id',state.userId).eq('folder_id',activeFolder.id).in('empresa_id',ids);
+    if(error){ toast('Não foi possível remover as empresas da pasta.'); return; }
+    ids.forEach(id=>{ const company=state.companies.find(item=>item.id===id); if(company) company.folderIds=(company.folderIds||[]).filter(folderId=>folderId!==activeFolder.id); });
+    state.selectedOpps=[]; render(); toast('Empresas removidas da pasta.');
+  });
+  const archive=document.getElementById('bulkArchive');
+  if(archive) archive.addEventListener('click',async()=>{
+    const ids=state.selectedOpps.slice();
+    const restoring=state.oppFilters.archive==='arquivadas';
+    const archivedAt=restoring?null:new Date().toISOString();
+    const {error}=await sb.from('empresas').update({archived_at:archivedAt}).eq('user_id',state.userId).in('id',ids);
+    if(error){ toast('Não foi possível '+(restoring?'desarquivar':'arquivar')+' as empresas.'); return; }
+    ids.forEach(id=>{ const company=state.companies.find(item=>item.id===id); if(company) company.archivedAt=archivedAt; });
+    state.selectedOpps=[]; render(); toast(ids.length+' empresa'+(ids.length===1?'':'s')+' '+(restoring?'restaurada'+(ids.length===1?'':'s'):'arquivada'+(ids.length===1?'':'s'))+'.');
+  });
+  const removeCompanies=document.getElementById('bulkDelete');
+  if(removeCompanies) removeCompanies.addEventListener('click',async()=>{
+    const ids=state.selectedOpps.slice();
+    if(!window.confirm(`Excluir permanentemente ${ids.length} empresa${ids.length===1?'':'s'}? Diagnósticos, evidências e vínculos também serão removidos.`)) return;
+    const {error}=await sb.from('empresas').delete().eq('user_id',state.userId).in('id',ids);
+    if(error){ toast('Sem permissão para excluir estas empresas.'); return; }
+    state.companies=state.companies.filter(company=>!ids.includes(company.id));
+    state.selectedOpps=[]; render(); toast(ids.length+' empresa'+(ids.length===1?' excluída':'s excluídas')+'.');
   });
 }
 function bindResultados(){
