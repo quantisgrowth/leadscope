@@ -29,6 +29,9 @@ type Company = {
   source_payload: Record<string, unknown> | null;
   dados_google: Record<string, unknown> | null;
   sinais_keys: string[] | null;
+  cnpj_cnae_description: string | null;
+  cnpj_identity_score: number | null;
+  cnpj_validated_at: string | null;
 };
 
 function cleanText(value: unknown, max = 240) {
@@ -52,7 +55,8 @@ function meaningfulTokens(value: unknown) {
 
 function matchOffer(company: Company, payload: Record<string, unknown>, signals: string[], offer: Offer) {
   const categories = Array.isArray(payload.categories) ? payload.categories : [];
-  const companyText = normalizeText([company.nome, company.segmento, payload.categoryName, ...categories].join(" "));
+  const verifiedActivity = company.cnpj_validated_at && Number(company.cnpj_identity_score) >= 50 ? company.cnpj_cnae_description : null;
+  const companyText = normalizeText([company.nome, company.segmento, payload.categoryName, ...categories, verifiedActivity].join(" "));
   const categoryMatches = (offer.categorias ?? []).filter((category) => companyText.includes(normalizeText(category)));
   const signalMatches = (offer.sinais ?? []).filter((signal) => signals.includes(signal));
   const companyTokens = new Set(meaningfulTokens(companyText));
@@ -67,6 +71,7 @@ function matchOffer(company: Company, payload: Record<string, unknown>, signals:
   if (categoryMatches.length) reasons.push(`categoria compatível: ${categoryMatches.slice(0, 2).join(", ")}`);
   else if (tokenMatches.length) reasons.push(`atividade compatível: ${tokenMatches.slice(0, 3).join(", ")}`);
   if (signalMatches.length) reasons.push(`${signalMatches.length} sinal(is) de oportunidade relacionado(s)`);
+  if (verifiedActivity && (categoryMatches.length || tokenMatches.length)) reasons.push("atividade cadastral da empresa incluída na comparação");
   if (!reasons.length) reasons.push("produto ativo na esteira para validação comercial");
   const outcome = cleanText(offer.resultado, 180);
   return { offer, compatibility, reason: `Aderência baseada em ${reasons.join(" e ")}.${outcome ? ` Resultado a validar: ${outcome}` : ""}` };
@@ -151,7 +156,7 @@ export default {
       const requestedIds = Array.isArray(body.company_ids) ? [...new Set(body.company_ids.map((value: unknown) => cleanText(value, 64)).filter(Boolean))] : [];
       if (requestedIds.length > 100) return Response.json({ error: "Selecione no máximo 100 empresas por reanálise." }, { status: 400 });
 
-      let companyQuery = ctx.supabase.from("empresas").select("id,user_id,radar_id,nome,segmento,endereco,telefone,site,nota,avaliacoes,business_status,google_maps_url,source_url,source_payload,dados_google,sinais_keys").eq("user_id", userId).order("analisado_em", { ascending: true }).limit(500);
+      let companyQuery = ctx.supabase.from("empresas").select("id,user_id,radar_id,nome,segmento,endereco,telefone,site,nota,avaliacoes,business_status,google_maps_url,source_url,source_payload,dados_google,sinais_keys,cnpj_cnae_description,cnpj_identity_score,cnpj_validated_at").eq("user_id", userId).order("analisado_em", { ascending: true }).limit(500);
       if (requestedIds.length) companyQuery = companyQuery.in("id", requestedIds);
       const [{ data: companies, error: companiesError }, { data: offers, error: offersError }] = await Promise.all([
         companyQuery,

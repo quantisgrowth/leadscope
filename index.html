@@ -426,6 +426,7 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds, of
   const recommendedOffer=(offer&&offer.nome)||(!legacyAgencyRecommendation&&row.servico_recomendado)||'Nenhuma oferta compatível definida';
   const evidencias = (evidenciaRows||[]).map(e=>({
     texto:e.texto, fonte:publicSourceLabel(e.fonte),
+    url:e.url_fonte||row.source_url||row.google_maps_url||'',
     data: e.data ? fmtDate(new Date(e.data+'T00:00:00')) : '',
     confianca:e.confianca,
   }));
@@ -433,11 +434,14 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds, of
   const collectedCategories=Array.isArray(sourcePayload.categories) ? sourcePayload.categories.filter(Boolean) : [];
   const completedAudit=latestAudit&&latestAudit.status==='concluido' ? latestAudit : null;
   const auditChecks=completedAudit&&completedAudit.checks&&typeof completedAudit.checks==='object' ? completedAudit.checks : {};
+  const auditMetrics=completedAudit&&completedAudit.metrics||{};
   return {
     id:row.id, nome:row.nome, segmento:row.segmento, cidade:row.cidade, bairro:row.bairro, endereco:row.endereco,
     telefone:row.telefone, site:row.site, redes:row.redes||[], nota:row.nota, avaliacoes:row.avaliacoes,
     categorias:[...new Set([row.segmento,...collectedCategories].filter(Boolean))], sourcePayload,
     siteAudit:latestAudit||null,
+    cnpjCandidates:Array.isArray(auditMetrics.cnpj_candidates)?auditMetrics.cnpj_candidates:[],
+    publicChannels:collectedChannels(auditMetrics,completedAudit),
     score:row.score, confianca:row.confianca, potencial:row.potencial,
     sinais, evidencias,
     interpretacoes:[...new Set(sinais.map(s=>s.interpretacao))].slice(0,3),
@@ -477,12 +481,65 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds, of
       sentimento:null, temas:[],
     },
     jornada:{
-      etapas:null, whatsapp:null, formulario:null, agendamentoOnline:null,
+      etapas:null, whatsapp:completedAudit?auditChecks.whatsapp:null, formulario:completedAudit?auditChecks.form:null, agendamentoOnline:completedAudit?auditChecks.booking:null,
     },
     presenca:{
       redesEncontradas:row.redes||[], frequencia:null,
     },
   };
+}
+
+function collectedChannels(metrics,audit){
+  const channels=[];
+  const add=(value,label)=>{
+    try{
+      const url=new URL(String(value));
+      if(!['https:','http:','mailto:','tel:'].includes(url.protocol)) return;
+      if(url.protocol==='mailto:'&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(url.pathname)) return;
+      if(url.protocol==='tel:'&&!/^\+?[\d()\s-]{8,25}$/.test(url.pathname)) return;
+      if(!channels.some(item=>item.url===url.href)) channels.push({label,url:url.href,source:audit&&(audit.final_url||audit.url),at:audit&&(audit.finished_at||audit.created_at)});
+    }catch(ignore){}
+  };
+  (Array.isArray(metrics.social_links)?metrics.social_links:[]).forEach(value=>{
+    try{
+      const host=new URL(value).hostname.toLowerCase();
+      const names={'instagram.com':'Instagram','facebook.com':'Facebook','linkedin.com':'LinkedIn','tiktok.com':'TikTok','youtube.com':'YouTube','x.com':'X','twitter.com':'X'};
+      const domain=Object.keys(names).find(key=>host===key||host.endsWith('.'+key));
+      if(domain&&!/shar(e|er|ing)|intent/i.test(new URL(value).pathname)) add(value,names[domain]);
+    }catch(ignore){}
+  });
+  (Array.isArray(metrics.whatsapp_links)?metrics.whatsapp_links:[]).forEach(value=>{
+    try{ if(/(^|\.)(wa\.me|api\.whatsapp\.com|web\.whatsapp\.com)$/.test(new URL(value).hostname)) add(value,'WhatsApp'); }catch(ignore){}
+  });
+  (Array.isArray(metrics.email_links)?metrics.email_links:[]).forEach(value=>add(value,'E-mail'));
+  (Array.isArray(metrics.phone_links)?metrics.phone_links:[]).forEach(value=>add(value,'Telefone'));
+  return channels;
+}
+
+function possibleDuplicates(company,companies){
+  const phone=value=>{
+    let digits=String(value||'').replace(/\D/g,'');
+    if(digits.length===12||digits.length===13) digits=digits.startsWith('55')?digits.slice(2):digits;
+    return digits.length===10||digits.length===11?digits:'';
+  };
+  const domain=value=>{
+    try{
+      const host=new URL(/^https?:\/\//i.test(value)?value:'https://'+value).hostname.toLowerCase().replace(/^www\./,'');
+      if(!host.includes('.')||/(^|\.)(google\.com|google\.com\.br|facebook\.com|instagram\.com|wa\.me|linkedin\.com|linktr\.ee|wixsite\.com|wordpress\.com|sites\.google\.com)$/.test(host)) return '';
+      return host;
+    }catch(ignore){ return ''; }
+  };
+  const compact=value=>normalizeText(value).replace(/[^a-z0-9]/g,'');
+  const companyDomain=domain(company.site||'');
+  const companyPhone=phone(company.telefone);
+  return companies.filter(other=>other.id!==company.id&&!other.archivedAt).map(other=>{
+    const reasons=[];
+    if(company.cnpj&&other.cnpj===company.cnpj) reasons.push('Mesmo CNPJ');
+    if(companyDomain&&domain(other.site||'')===companyDomain) reasons.push('Mesmo domínio do site');
+    if(companyPhone&&phone(other.telefone)===companyPhone) reasons.push('Mesmo telefone');
+    if(compact(company.nome).length>=4&&compact(company.nome)===compact(other.nome)&&compact(company.endereco).length>=10&&compact(company.endereco)===compact(other.endereco)) reasons.push('Mesmo nome e endereço');
+    return {company:other,reasons};
+  }).filter(item=>item.reasons.length);
 }
 
 function companyLocation(company){
@@ -600,7 +657,7 @@ const setPath = setPathLocal;
 
 /* ================= SUPABASE: CARREGAR / GRAVAR DADOS ================= */
 async function loadAllData(userId){
-  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}, {data:siteAuditRows}, {data:offerRows}, {data:offerMatchRows}, {data:folderRows}, {data:folderLinkRows}, {data:statusHistoryRows}, {data:adminMarker}, {data:integrationRows}] = await Promise.all([
+  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}, {data:siteAuditRows}, {data:offerRows}, {data:offerMatchRows}, {data:folderRows}, {data:folderLinkRows}, {data:statusHistoryRows}, {data:adminMarker}, {data:integrationRows}, {data:scoreRows}] = await Promise.all([
     sb.from('profiles').select('*').eq('id', userId).maybeSingle(),
     sb.from('account_settings').select('*').eq('user_id', userId).maybeSingle(),
     sb.from('radares').select('*').eq('user_id', userId).order('criado_em', {ascending:false}),
@@ -614,6 +671,7 @@ async function loadAllData(userId){
     sb.from('company_status_history').select('empresa_id,status_anterior,status_novo,changed_by,changed_at').eq('user_id', userId).order('changed_at', {ascending:false}),
     sb.from('platform_admins').select('user_id').eq('user_id', userId).maybeSingle(),
     sb.from('platform_integrations').select('key,display_name,description,connected,sort_order').order('sort_order', {ascending:true}),
+    sb.from('score_components').select('empresa_id,dimensao,pontos,maximo,explicacao,calculado_em').eq('user_id',userId).order('calculado_em',{ascending:false}),
   ]);
   const evByEmpresa = {};
   (evidenciasRows||[]).forEach(e=>{ (evByEmpresa[e.empresa_id] = evByEmpresa[e.empresa_id]||[]).push(e); });
@@ -635,6 +693,12 @@ async function loadAllData(userId){
   const historyByCompany={};
   (statusHistoryRows||[]).forEach(item=>{ (historyByCompany[item.empresa_id]=historyByCompany[item.empresa_id]||[]).push(item); });
   const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id], latestAuditByEmpresa[row.id], matchByEmpresa[row.id], foldersByCompany[row.id], matchesByEmpresa[row.id], historyByCompany[row.id]));
+  const scoresByCompany={};
+  (scoreRows||[]).forEach(item=>{ (scoresByCompany[item.empresa_id]=scoresByCompany[item.empresa_id]||[]).push(item); });
+  companies.forEach(company=>{
+    const rows=scoresByCompany[company.id]||[];
+    company.scoreComponents=rows.length?rows.filter(item=>item.calculado_em===rows[0].calculado_em):[];
+  });
   const ob = rowToOnboarding(settings) || state.onboarding;
   setState({
     userId,
@@ -1658,6 +1722,7 @@ function renderDiagnostico(){
   const msgs = msgTemplates(c);
   const tone = state.diagTone;
   const currentOffer=c.offerRecommendation&&c.offerRecommendation.offer;
+  const duplicates=possibleDuplicates(c,state.companies);
   const alternativeOffers=(c.offerMatches||[]).filter(match=>!match.principal&&match.offer).slice(0,3);
   const currentStageIndex=currentOffer?OFFER_STAGES.findIndex(stage=>stage.key===currentOffer.etapa):-1;
   const nextOffer=currentStageIndex>=0?state.offers.filter(offer=>offer.ativo&&OFFER_STAGES.findIndex(stage=>stage.key===offer.etapa)>currentStageIndex).sort((a,b)=>OFFER_STAGES.findIndex(stage=>stage.key===a.etapa)-OFFER_STAGES.findIndex(stage=>stage.key===b.etapa)||a.posicao-b.posicao)[0]:null;
@@ -1690,6 +1755,7 @@ function renderDiagnostico(){
     </div>
   </div>
 
+  ${duplicates.length?`<div class="verification-note" style="margin-bottom:18px;"><b>Possíveis duplicidades</b><p>Um dado em comum pode pertencer a filiais ou empresas do mesmo grupo. Revise antes de arquivar; nenhum registro será mesclado ou excluído automaticamente.</p>${duplicates.slice(0,10).map(item=>`<div class="row between wrap" style="gap:8px;margin:8px 0;"><span>${esc(item.company.nome)} · ${item.reasons.map(esc).join(', ')}</span><button class="btn btn-sm" data-diag="${esc(item.company.id)}">Ver empresa</button></div>`).join('')}</div>`:''}
   <div class="grid" style="grid-template-columns:280px 1fr;align-items:start;margin-bottom:18px;">
     <div class="card" style="text-align:center;">
       <div class="card-title" style="text-align:left;">LeadScope Score</div>
@@ -1702,6 +1768,7 @@ function renderDiagnostico(){
         <div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Oferta relacionada</span><b style="color:var(--text);text-align:right;">${esc(c.servicoRecomendado||state.onboarding.servico||'Não definida')}</b></div>
         ${c.offerRecommendation?`<div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Compatibilidade</span><b style="color:var(--blue-light);">${c.offerRecommendation.compatibilidade}%</b></div>`:''}
         ${nextOffer?`<div class="row between" style="padding:6px 0;border-top:1px solid var(--border);"><span>Próxima oferta</span><b style="color:var(--text);text-align:right;">${esc(nextOffer.nome)}</b></div>`:''}
+        ${(c.scoreComponents||[]).length?`<details style="margin-top:12px;"><summary style="cursor:pointer;color:var(--text);">Como o score foi calculado</summary>${c.scoreComponents.map(item=>`<div style="padding:8px 0;border-top:1px solid var(--border);"><div class="row between"><span>${esc(item.dimensao)}</span><b>${esc(item.pontos)} / ${esc(item.maximo)}</b></div><div style="margin-top:4px;font-size:11px;">${esc(item.explicacao||'')}</div></div>`).join('')}<p>Indicador de prioridade comercial, não uma probabilidade de compra.</p></details>`:''}
       </div>
     </div>
 
@@ -1716,7 +1783,7 @@ function renderDiagnostico(){
                 <span>${icon('doc')} ${esc(e.fonte)}</span>
                 <span>${esc(e.data)}</span>
                 <span class="badge ${e.confianca==='Alta'?'badge-blue':e.confianca==='Média'?'badge-warn':'badge-gray'}" style="padding:1px 8px;">${e.confianca}</span>
-                <a href="#" style="color:var(--blue-light);text-decoration:none;">Ver evidência →</a>
+                ${e.url?externalSiteLink(e.url):'<span class="muted">Fonte sem link disponível</span>'}
               </div>
             </div>`).join('')}
         </div>
@@ -1771,7 +1838,7 @@ function renderDiagnostico(){
   </div>
   `;
 }
-function kv(label,val){ return `<div class="row between" style="padding:9px 0;border-top:1px solid var(--border);font-size:13.5px;"><span class="muted">${label}</span><span style="font-weight:600;text-align:right;">${val}</span></div>`; }
+function kv(label,val){ return `<div class="row between" style="gap:12px;padding:9px 0;border-top:1px solid var(--border);font-size:13.5px;"><span class="muted" style="min-width:0;">${label}</span><span style="min-width:0;max-width:70%;overflow-wrap:anywhere;font-weight:600;text-align:right;">${val}</span></div>`; }
 function verificationBadge(v){
   if(v===true) return `<span class="badge badge-blue">${icon('check')} Sim</span>`;
   if(v===false) return `<span class="badge badge-warn">${icon('alert')} Não</span>`;
@@ -1793,6 +1860,7 @@ function renderDetailTab(c, tab){
     <div class="divider"></div>
     <div class="row between wrap" style="gap:12px;margin-bottom:10px;"><div><div class="card-title" style="font-size:13.5px;">Validação cadastral</div><div class="muted" style="font-size:11.5px;">Consulte a situação da empresa em um cadastro público de pessoa jurídica.</div></div>${cnpjBadge}</div>
     <div class="row gap-8 wrap" style="align-items:stretch;margin-bottom:12px;"><input class="input" id="companyCnpjInput" value="${esc(formatCnpj(c.cnpj))}" placeholder="00.000.000/0000-00" inputmode="text" maxlength="18" style="max-width:260px;"><button class="btn btn-primary" id="validateCnpjBtn">${c.cnpjValidatedAt?'Validar novamente':'Validar CNPJ'}</button></div>
+    ${c.cnpjCandidates.length?`<div class="verification-note"><b>CNPJ encontrado no site — ainda não vinculado</b><p>O número pode ser de uma matriz, filial ou fornecedor. Consulte o cadastro e compare a identidade antes de associar à empresa.</p>${c.cnpjCandidates.map(item=>`<div style="margin:10px 0;"><button class="btn btn-sm" data-cnpj-candidate="${esc(item.cnpj)}">Usar ${esc(formatCnpj(item.cnpj))}</button><div class="muted" style="margin-top:5px;overflow-wrap:anywhere;">${esc(item.context||'')} · ${externalSiteLink(item.source||c.site)}</div></div>`).join('')}</div>`:c.siteAudit&&c.siteAudit.status==='concluido'?`<div class="muted" style="font-size:12px;">${c.siteAudit.metrics&&c.siteAudit.metrics.enrichment_version?'Nenhum CNPJ identificado na página inicial auditada. Isso não significa que a empresa não tenha CNPJ.':'Esta auditoria é anterior à descoberta de CNPJ. Audite novamente para procurar o número na página inicial.'}</div>`:''}
     ${c.cnpjValidatedAt?`
       ${kv('CNPJ', esc(formatCnpj(c.cnpj)))}
       ${kv('Situação cadastral', cnpjBadge)}
@@ -1848,7 +1916,7 @@ function renderDetailTab(c, tab){
   }
   if(tab==='jornada'){
     return `
-    <div class="verification-note">Esta jornada depende da futura auditoria do site. Nenhuma etapa é estimada sem uma verificação real.</div>
+    <div class="verification-note">${c.siteAudit&&c.siteAudit.status==='concluido'?'Disponibilidade observada na página inicial auditada. Os links não foram acionados e o envio de formulários não foi testado.':'Execute a auditoria do site para verificar os canais de contato.'}</div>
     ${kv('Etapas até o contato', c.jornada.etapas==null?verificationBadge(null):esc(c.jornada.etapas))}
     ${kv('WhatsApp disponível', verificationBadge(c.jornada.whatsapp))}
     ${kv('Formulário disponível', verificationBadge(c.jornada.formulario))}
@@ -1857,6 +1925,8 @@ function renderDetailTab(c, tab){
   }
   if(tab==='presenca'){
     return `
+    <div class="verification-note">Links publicados na página inicial da empresa. A existência do link não confirma a titularidade do perfil nem sua atividade recente.</div>
+    ${(c.publicChannels||[]).length?c.publicChannels.map(channel=>kv(esc(channel.label),`<a href="${esc(channel.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue-light);overflow-wrap:anywhere;">${esc(channel.url)} ↗</a><div class="muted" style="font-size:11px;">Encontrado em ${esc(fmtDate(new Date(channel.at)))} · ${externalSiteLink(channel.source)}</div>`)).join(''):kv('Canais coletados','Nenhum link identificado na auditoria disponível')}
     ${kv('Redes encontradas', c.presenca.redesEncontradas.length?c.presenca.redesEncontradas.map(esc).join(', '):'Não informado')}
     ${kv('Frequência aparente de publicações', c.presenca.frequencia?esc(c.presenca.frequencia):verificationBadge(null))}
     ${kv('Consistência das informações', verificationBadge(null))}
@@ -1900,14 +1970,22 @@ async function validateCompanyCnpj(){
   if(cnpj.length!==14){ toast('Informe um CNPJ com 14 caracteres.'); input.focus(); return; }
   button.disabled=true; button.textContent='Consultando cadastro…';
   try{
-    const {data,error}=await sb.functions.invoke('validate-cnpj',{body:{company_id:company.id,cnpj}});
+    let {data,error}=await sb.functions.invoke('validate-cnpj',{body:{company_id:company.id,cnpj}});
     if(error) throw new Error(await edgeFunctionErrorMessage(error));
     if(data&&data.error) throw new Error(data.error);
+    if(data&&data.requires_confirmation){
+      if(!confirm(`A correspondência com esta empresa é baixa (${data.identity_score}%).\n\nCadastro encontrado: ${data.legal_name||data.trade_name||'Nome não informado'}\nCidade: ${data.municipality||'Não informada'}\nSituação: ${data.status}\n\nConfirma que este CNPJ pertence à empresa ${company.nome}?`)) return;
+      ({data,error}=await sb.functions.invoke('validate-cnpj',{body:{company_id:company.id,cnpj,confirm_identity:true}}));
+      if(error) throw new Error(await edgeFunctionErrorMessage(error));
+      if(data&&data.error) throw new Error(data.error);
+    }
     await loadAllData(state.userId);
     toast(data&&data.active?'CNPJ validado e situação ativa confirmada.':'CNPJ consultado. Revise a situação cadastral encontrada.');
   }catch(error){
     button.disabled=false; button.textContent=company.cnpjValidatedAt?'Validar novamente':'Validar CNPJ';
     toast('Não foi possível validar o CNPJ: '+((error&&error.message)||'tente novamente.'));
+  }finally{
+    if(document.body.contains(button)){ button.disabled=false; button.textContent=company.cnpjValidatedAt?'Validar novamente':'Validar CNPJ'; }
   }
 }
 async function runSiteAudit(){
@@ -1971,6 +2049,10 @@ function bindDiagnostico(){
   }
   const validateCnpjBtn=document.getElementById('validateCnpjBtn');
   if(validateCnpjBtn) validateCnpjBtn.addEventListener('click',validateCompanyCnpj);
+  document.querySelectorAll('[data-cnpj-candidate]').forEach(button=>button.addEventListener('click',()=>{
+    const input=document.getElementById('companyCnpjInput');
+    if(input){ input.value=formatCnpj(button.dataset.cnpjCandidate); input.focus(); toast('CNPJ preenchido. Clique em Validar CNPJ para consultar e comparar a identidade.'); }
+  }));
   document.querySelectorAll('[data-setstatus]').forEach(el=>{
     el.addEventListener('click', async ()=>{
       const c = state.companies.find(x=>x.id===currentDiagId);

@@ -46,7 +46,18 @@ Não coloque `APIFY_API_TOKEN` nem a chave `service_role` no `index.html`. A cha
 4. O navegador cria o radar autenticado e chama a Edge Function.
 5. A função consulta o provedor configurado, calcula o score, cruza os sinais com as ofertas selecionadas, registra evidências e devolve a quantidade encontrada.
 
-O CNPJ e a análise profunda de site/redes sociais ficam preparados como próximos módulos. Esta etapa evita afirmar problemas que ainda não foram realmente verificados.
+O diagnóstico distingue dados públicos coletados, verificações técnicas e hipóteses comerciais. Ele não afirma problemas que ainda não foram realmente verificados.
+
+### Enriquecimento e identidade cadastral (Fase 4)
+
+- A auditoria da página inicial descobre links de redes sociais, WhatsApp, telefone e e-mail, apresentados com URL da evidência e data. Links de compartilhamento e domínios que imitam redes sociais são descartados.
+- CNPJs encontrados no texto visível próximo à identificação “CNPJ” passam pela verificação de dígitos (numéricos ou alfanuméricos). São candidatos, não vínculos automáticos. O usuário seleciona o número e consulta o cadastro público; baixa correspondência de nome/cidade/telefone exige confirmação explícita antes de salvar.
+- A reanálise inclui a descrição da atividade cadastral na comparação com os produtos quando há validação e correspondência de identidade de pelo menos 50%. Não comprova necessidade ou intenção de compra. O diagnóstico mostra os componentes mais recentes do score.
+- Possíveis duplicidades aparecem no diagnóstico por CNPJ, domínio, telefone ou nome/endereço iguais. Filiais e grupos podem compartilhar esses dados; não há exclusão nem mesclagem automática. A comparação utiliza os registros disponíveis na conta, excluindo arquivados.
+- Auditorias anteriores já podem mostrar os links sociais armazenados. Para descobrir CNPJ/e-mail/telefone em auditorias antigas, é necessário auditar novamente. Não há enriquecimento retroativo fictício.
+- O limite de cada auditoria continua em uma página e US$ 0,25 por execução; nenhum limite mensal foi aumentado. O teste automatizado não consome créditos: `node tests/phase4.mjs`.
+
+Limitações: não há coleta profunda de páginas de contato, teste de envio de formulário, confirmação de titularidade das redes nem análise de frequência de publicações. Ausência na página inicial não significa inexistência. A consulta cadastral usa um intermediário de dados públicos, não uma conexão direta com a Receita Federal.
 
 ## Publicação segura
 

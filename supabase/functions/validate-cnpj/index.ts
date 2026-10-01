@@ -19,10 +19,11 @@ function tokenSimilarity(left: unknown, right: unknown) {
   return intersection / Math.max(a.size, b.size);
 }
 
-function numericCnpjIsValid(cnpj: string) {
-  if (!/^\d{14}$/.test(cnpj) || /^(\d)\1{13}$/.test(cnpj)) return false;
+function cnpjIsValid(cnpj: string) {
+  if (!/^[0-9A-Z]{12}[0-9]{2}$/.test(cnpj) || /^(.)\1{13}$/.test(cnpj)) return false;
   const digit = (base: string, weights: number[]) => {
-    const sum = base.split("").reduce((total, value, index) => total + Number(value) * weights[index], 0);
+    // Receita Federal's alphanumeric algorithm also preserves numeric CNPJ checks.
+    const sum = base.split("").reduce((total, value, index) => total + (value.charCodeAt(0) - 48) * weights[index], 0);
     const remainder = sum % 11;
     return remainder < 2 ? 0 : 11 - remainder;
   };
@@ -71,24 +72,30 @@ export default {
       const cnpj = cleanCnpj(body.cnpj);
       if (!companyId) return Response.json({ error: "Empresa não informada." }, { status: 400 });
       if (!/^[0-9A-Z]{12}[0-9]{2}$/.test(cnpj)) return Response.json({ error: "Informe um CNPJ com 14 caracteres válidos." }, { status: 400 });
-      if (/^\d{14}$/.test(cnpj) && !numericCnpjIsValid(cnpj)) return Response.json({ error: "Os dígitos verificadores do CNPJ são inválidos." }, { status: 400 });
+      if (!cnpjIsValid(cnpj)) return Response.json({ error: "Os dígitos verificadores do CNPJ são inválidos." }, { status: 400 });
 
       const { data: company, error: companyError } = await ctx.supabase.from("empresas").select("id,nome,cidade,telefone").eq("id", companyId).eq("user_id", userId).single();
       if (companyError || !company) return Response.json({ error: "Empresa não encontrada." }, { status: 404 });
 
       const registry = await fetchRegistry(cnpj);
+      if (cleanCnpj(registry.cnpj) !== cnpj) throw new Error("O cadastro público retornou uma identificação diferente. Tente novamente mais tarde.");
       const legalName = String(registry.razao_social ?? "").trim();
       const tradeName = String(registry.nome_fantasia ?? "").trim();
       const nameMatch = Math.max(tokenSimilarity(company.nome, tradeName), tokenSimilarity(company.nome, legalName));
-      const companyCity = normalizeText(company.cidade).split(" sp")[0].split(" mg")[0].split(" rj")[0].trim();
+      const companyCity = normalizeText(String(company.cidade ?? '').replace(/\s*[,/-]\s*[A-Z]{2}\s*$/i, ''));
       const registryCity = normalizeText(registry.municipio);
-      const cityMatch = !!companyCity && !!registryCity && (companyCity.includes(registryCity) || registryCity.includes(companyCity));
-      const companyPhone = String(company.telefone ?? "").replace(/\D/g, "").slice(-8);
-      const registryPhones = [registry.ddd_telefone_1, registry.ddd_telefone_2].map((value) => String(value ?? "").replace(/\D/g, "").slice(-8)).filter(Boolean);
+      const cityMatch = !!companyCity && companyCity === registryCity;
+      const phone = (value: unknown) => {
+        let digits = String(value ?? '').replace(/\D/g, '');
+        if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) digits = digits.slice(2);
+        return /^\d{10,11}$/.test(digits) ? digits : '';
+      };
+      const companyPhone = phone(company.telefone);
+      const registryPhones = [registry.ddd_telefone_1, registry.ddd_telefone_2].map(phone).filter(Boolean);
       const phoneMatch = !!companyPhone && registryPhones.includes(companyPhone);
       const identityScore = Math.min(100, Math.round(nameMatch * 70) + (cityMatch ? 20 : 0) + (phoneMatch ? 10 : 0));
       const status = String(registry.descricao_situacao_cadastral ?? "NÃO INFORMADA").trim().toUpperCase();
-      const active = status === "ATIVA";
+      const active = status === "NÃO INFORMADA" ? null : status === "ATIVA";
       const validatedAt = new Date().toISOString();
 
       const update = {
@@ -104,6 +111,10 @@ export default {
         cnpj_identity_score: identityScore,
         cnpj_validated_at: validatedAt,
       };
+      if (identityScore < 50 && body.confirm_identity !== true) {
+        return Response.json({ requires_confirmation: true, cnpj, legal_name: legalName, trade_name: tradeName,
+          municipality: String(registry.municipio ?? ''), status, identity_score: identityScore });
+      }
       const { error: updateError } = await ctx.supabase.from("empresas").update(update).eq("id", companyId).eq("user_id", userId);
       if (updateError) throw updateError;
 

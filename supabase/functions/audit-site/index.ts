@@ -32,7 +32,33 @@ const PAGE_FUNCTION = `async function pageFunction({ page }) {
     const viewportMeta = document.querySelector('meta[name="viewport"]')?.getAttribute('content') || '';
     const horizontalOverflow = document.documentElement.scrollWidth > window.innerWidth + 4;
     const hasResponsiveViewport = /width\\s*=\\s*device-width/i.test(viewportMeta);
-    const socialLinks = links.filter((link) => /instagram\\.com|facebook\\.com|linkedin\\.com|tiktok\\.com|youtube\\.com/i.test(link.href)).map((link) => link.href).slice(0, 20);
+    const socialLinks = links.filter((link) => {
+      try {
+        const url = new URL(link.href);
+        return ['http:', 'https:'].includes(url.protocol) && /(^|\\.)(instagram\\.com|facebook\\.com|linkedin\\.com|tiktok\\.com|youtube\\.com|x\\.com|twitter\\.com)$/.test(url.hostname) && !/shar(e|er|ing)|intent/i.test(url.pathname);
+      } catch { return false; }
+    }).map((link) => link.href).slice(0, 20);
+    // Candidates are evidence only: a footer can belong to a parent company or supplier.
+    const bodyText = (document.body.innerText || '').slice(0, 150000);
+    const cnpjCandidates = [];
+    const pattern = /\\b(?:[0-9A-Z]{2}\\.[0-9A-Z]{3}\\.[0-9A-Z]{3}\\/[0-9A-Z]{4}-[0-9]{2}|[0-9A-Z]{14})\\b/gi;
+    for (const match of bodyText.matchAll(pattern)) {
+      const context = bodyText.slice(Math.max(0, match.index - 80), match.index + match[0].length + 80).replace(/\\s+/g, ' ');
+      if (!/cnpj/i.test(context)) continue;
+      const value = match[0].toUpperCase().replace(/[^0-9A-Z]/g, '');
+      if (!/^[0-9A-Z]{12}[0-9]{2}$/.test(value) || /^(.)\\1{13}$/.test(value)) continue;
+      const digit = (base, weights) => {
+        const remainder = [...base].reduce((sum, char, i) => sum + (char.charCodeAt(0) - 48) * weights[i], 0) % 11;
+        return remainder < 2 ? 0 : 11 - remainder;
+      };
+      const first = digit(value.slice(0, 12), [5,4,3,2,9,8,7,6,5,4,3,2]);
+      const second = digit(value.slice(0, 12) + first, [6,5,4,3,2,9,8,7,6,5,4,3,2]);
+      if (!value.endsWith('' + first + second) || cnpjCandidates.some(item => item.cnpj === value)) continue;
+      cnpjCandidates.push({ cnpj: value, context, source: location.href });
+      if (cnpjCandidates.length >= 5) break;
+    }
+    const emailLinks = links.filter(link => /^mailto:/i.test(link.href)).map(link => link.href.split('?')[0]).slice(0, 10);
+    const phoneLinks = links.filter(link => /^tel:/i.test(link.href)).map(link => link.href).slice(0, 10);
     const seoPassed = title.length >= 10 && description.length >= 50 && h1Count >= 1;
     return {
       pageUrl: location.href,
@@ -47,6 +73,9 @@ const PAGE_FUNCTION = `async function pageFunction({ page }) {
       bookingLinks: bookingLinks.map((link) => link.href).slice(0, 10),
       contactForms: contactForms.length,
       socialLinks,
+      emailLinks,
+      phoneLinks,
+      cnpjCandidates,
       checks: {
         https: location.protocol === 'https:',
         responsive: hasResponsiveViewport && !horizontalOverflow,
@@ -228,6 +257,8 @@ export default {
         h1_count: technical.h1Count || 0, viewport: technical.viewportMeta || null, horizontal_overflow: !!technical.horizontalOverflow,
         whatsapp_links: technical.whatsappLinks || [], booking_links: technical.bookingLinks || [],
         contact_forms: technical.contactForms || 0, social_links: technical.socialLinks || [],
+        email_links: technical.emailLinks || [], phone_links: technical.phoneLinks || [],
+        cnpj_candidates: technical.cnpjCandidates || [], enrichment_version: 1,
       };
       const finishedAt = new Date().toISOString();
       const { data: saved, error: saveError } = await ctx.supabase.from("site_audits").update({
