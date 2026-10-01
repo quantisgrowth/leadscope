@@ -1774,7 +1774,7 @@ async function runSiteAudit(){
     }
     if(!startData||!startData.audit_id) throw new Error('A auditoria não retornou uma identificação para acompanhamento.');
     button.textContent='Auditando site…';
-    const deadline=Date.now()+150000;
+    const deadline=Date.now()+210000;
     let result=startData;
     while(result.status!=='concluido'){
       if(Date.now()>deadline) throw new Error('A auditoria continua processando. Tente abrir esta empresa novamente em alguns instantes.');

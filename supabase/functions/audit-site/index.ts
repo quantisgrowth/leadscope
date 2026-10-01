@@ -177,12 +177,12 @@ export default {
         if (auditError) throw auditError;
         auditId = audit.id;
 
-        const payload = await apifyRequest(`acts/${APIFY_ACTOR}/runs?maxItems=1&maxTotalChargeUsd=0.25&timeout=90`, token, {
+        const payload = await apifyRequest(`acts/${APIFY_ACTOR}/runs?maxItems=1&maxTotalChargeUsd=0.25&timeout=180`, token, {
           method: "POST",
           body: JSON.stringify({
             startUrls: [{ url }], crawlerType: "playwright:firefox", maxCrawlDepth: 0, maxCrawlPages: 1, maxResults: 1,
-            useSitemaps: false, proxyConfiguration: { useApifyProxy: false }, initialConcurrency: 1, maxConcurrency: 1,
-            requestTimeoutSecs: 45, maxRequestRetries: 1, maxScrollHeightPixels: 2500, removeCookieWarnings: true,
+            useSitemaps: false, proxyConfiguration: { useApifyProxy: true, apifyProxyGroups: [] }, initialConcurrency: 1, maxConcurrency: 1,
+            requestTimeoutSecs: 60, maxRequestRetries: 0, maxScrollHeightPixels: 2500, removeCookieWarnings: true,
             blockMedia: true, expandIframes: false, clickElementsCssSelector: "", pageFunction: PAGE_FUNCTION,
             keepElementsCssSelector: "#leadscope-audit-result", removeElementsCssSelector: "script,style,noscript,svg",
             htmlTransformer: "none", saveHtml: true, saveMarkdown: true, saveHtmlAsFile: false,
