@@ -191,6 +191,9 @@ tr.row-hover:hover{background:var(--hover);}
 .bulk-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;margin-bottom:14px;border:1px solid color-mix(in srgb,var(--blue) 35%,var(--border));background:color-mix(in srgb,var(--blue) 8%,var(--card));border-radius:12px;}
 .folder-strip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:2px 0 12px;margin-bottom:2px;}
 .folder-picker{position:relative;min-width:0;max-width:100%;}
+.export-picker{position:relative;}.export-picker summary{list-style:none;}.export-picker summary::-webkit-details-marker{display:none;}
+.export-menu{position:absolute;right:0;top:calc(100% + 8px);width:310px;max-width:calc(100vw - 48px);z-index:35;padding:8px;border:1px solid var(--border);border-radius:12px;background:var(--card);box-shadow:0 12px 36px rgba(0,0,0,.18);box-sizing:border-box;}
+.export-menu button{display:block;width:100%;padding:10px;text-align:left;border:0;border-radius:8px;background:transparent;color:var(--text);font:inherit;font-size:13px;cursor:pointer;}.export-menu button:hover:not(:disabled){background:var(--hover);}.export-menu button:disabled{opacity:.45;cursor:not-allowed;}.export-menu small{display:block;color:var(--text-secondary);font-size:11.5px;line-height:1.4;margin-top:4px;}
 .folder-menu-row[hidden]{display:none;}
 .folder-menu{max-height:70vh;overflow-y:auto;box-sizing:border-box;}
 .folder-picker summary{list-style:none;max-width:100%;}.folder-picker summary::-webkit-details-marker{display:none;}
@@ -1557,6 +1560,46 @@ function bindRadarProcessing(){
 
 /* ================= OPORTUNIDADES ================= */
 function dateKey(value){ return value ? String(value).slice(0,10) : ''; }
+function opportunityExportRows(mode){
+  if(mode==='filtered')return opportunityDataset();
+  if(mode!=='selected')throw new Error('Opção de exportação inválida.');
+  const selected=new Set(state.selectedOpps);
+  return state.companies.filter(company=>selected.has(company.id));
+}
+function csvCell(value){
+  let text=value==null?'':String(value);
+  // CSV quoting alone does not prevent Excel/Sheets from executing formulas.
+  if(/^[\s\u0000-\u001f]*[=+\-@＝＋－＠]/u.test(text))text="'"+text;
+  return '"'+text.replace(/"/g,'""')+'"';
+}
+function buildCompanyCsv(companies){
+  const headers=['Empresa','Segmento','Cidade','Bairro','Endereço','Telefone','Site','CNPJ','Situação do CNPJ','Score','Potencial','Produto ou serviço recomendado','Confiança','Status','Principal sinal','Pastas','Data de criação','Data de análise','Arquivada'];
+  const rows=companies.map(c=>[
+    c.nome,c.segmento,c.cidade,c.bairro,c.endereco,c.telefone,c.site,c.cnpj?formatCnpj(c.cnpj):'',c.cnpjStatus,
+    c.score,({alto:'Alto',medio:'Médio',baixo:'Baixo'})[c.potencial]||c.potencial,c.servicoRecomendado,c.confianca,c.status,
+    c.sinais?.[0]?.texto,(c.folderIds||[]).map(id=>state.folders.find(folder=>folder.id===id)?.nome).filter(Boolean).join(' | '),
+    dateKey(c.createdAt),dateKey(c.analyzedAt),c.archivedAt?'Sim':'Não'
+  ]);
+  return '\ufeff'+[headers,...rows].map(row=>row.map(csvCell).join(';')).join('\r\n')+'\r\n';
+}
+function downloadCompanyCsv(mode){
+  const companies=opportunityExportRows(mode);
+  if(!companies.length){toast(mode==='selected'?'Selecione pelo menos uma empresa.':'Não há resultados para exportar nesta visualização.');return;}
+  let url;
+  try{
+    const blob=new Blob([buildCompanyCsv(companies)],{type:'text/csv;charset=utf-8;'});
+    url=URL.createObjectURL(blob);
+    const anchor=document.createElement('a');anchor.href=url;
+    anchor.download='leadscope-'+(mode==='selected'?'selecionadas':'filtradas')+'-'+new Date().toISOString().replace(/[:.]/g,'-')+'.csv';
+    document.body.appendChild(anchor);
+    try{anchor.click();}finally{anchor.remove();}
+    document.getElementById('csvExportPicker').open=false;
+    toast('Download iniciado: '+companies.length+' empresa'+(companies.length===1?'':'s')+'.');
+  }catch{toast('Não foi possível iniciar a exportação. Tente novamente.');}
+  finally{if(url)setTimeout(()=>URL.revokeObjectURL(url),30000);}
+}
+document.addEventListener('click',event=>{const picker=document.getElementById('csvExportPicker');if(event.target.isConnected&&picker?.open&&!picker.contains(event.target))picker.open=false;});
+document.addEventListener('keydown',event=>{const picker=document.getElementById('csvExportPicker');if(event.key==='Escape'&&picker?.open){picker.open=false;picker.querySelector('summary').focus();}});
 function normalizedText(value){ return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
 function companyOffer(c){
   if(c.offerRecommendation&&c.offerRecommendation.offer) return c.offerRecommendation.offer;
@@ -1655,7 +1698,7 @@ function renderOportunidades(){
       <button class="btn btn-sm ${f.view==='tabela'?'btn-primary':''}" id="viewTabela">Tabela</button>
       <button class="btn btn-sm ${f.view==='cards'?'btn-primary':''}" id="viewCards">Cards</button>
       <button class="btn btn-sm ${f.view==='funil'?'btn-primary':''}" id="viewFunnel">Funil</button>
-      <button class="btn btn-sm" id="exportCsv">${icon('dl')} Exportar CSV</button>
+      <details class="export-picker" id="csvExportPicker"><summary class="btn btn-sm">${icon('dl')} Exportar CSV ▾</summary><div class="export-menu"><button data-export-csv="selected" ${opportunityExportRows('selected').length?'':'disabled'}>Exportar selecionadas (${opportunityExportRows('selected').length})<small>Somente as empresas marcadas, inclusive em outras páginas ou filtros.</small></button><button data-export-csv="filtered" ${list.length?'':'disabled'}>Exportar resultados filtrados (${list.length})<small>Todos os resultados desta visualização, em todas as páginas.</small></button></div></details>
     </div>
   </div>
 
@@ -2665,8 +2708,7 @@ function bindOportunidades(){
       setState({});
     });
   }
-  const exp = document.getElementById('exportCsv');
-  if(exp) exp.addEventListener('click', ()=>{ flashButton(exp, 'Exportado'); toast('Exportação CSV simulada — '+opportunityDataset().length+' linhas filtradas.'); });
+  document.querySelectorAll('[data-export-csv]').forEach(button=>button.addEventListener('click',()=>downloadCompanyCsv(button.dataset.exportCsv)));
   const bm = document.getElementById('bulkMonitor');
   if(bm) bm.addEventListener('click', async ()=>{
     const ids = state.selectedOpps.slice();

@@ -41,6 +41,7 @@ jobs:
           node tests/team-and-history.mjs
           node tests/manual-registration.mjs
           node tests/folder-navigation.mjs
+          node tests/csv-export.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 2.119.0
