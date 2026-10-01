@@ -1515,7 +1515,7 @@ function renderOportunidades(){
     <button class="btn btn-sm" id="openOppFilters">${icon('filter')} Filtros${chips.filter(item=>item[0]!=='search').length?` <span class="badge badge-blue">${chips.filter(item=>item[0]!=='search').length}</span>`:''}</button>
   </div>
   ${chips.filter(item=>item[0]!=='search').length?`<div class="filter-chips">${chips.filter(item=>item[0]!=='search').map(([key,label])=>`<button class="filter-chip" data-clear-filter="${key}">${esc(label)} <span aria-hidden="true">×</span></button>`).join('')}<button class="text-action" id="clearOppFilters">Limpar tudo</button></div>`:''}
-  ${state.selectedOpps.length ? `<div class="bulk-bar"><span class="badge badge-blue">${state.selectedOpps.length} selecionada${state.selectedOpps.length===1?'':'s'}</span><select class="input bulk-select" id="bulkFolder"><option value="">Adicionar a uma pasta…</option>${state.folders.map(folder=>`<option value="${folder.id}">${esc(folder.nome)}</option>`).join('')}</select><button class="btn btn-sm" id="bulkAddFolder" ${state.folders.length?'':'disabled'}>Adicionar</button>${currentFolder?`<button class="btn btn-sm" id="bulkRemoveFolder">Remover desta pasta</button>`:''}<span style="flex:1"></span><button class="btn btn-sm" id="bulkMonitor">Monitorar</button><button class="btn btn-sm" id="bulkStatus">Priorizar</button><button class="btn btn-sm" id="bulkArchive">${f.archive==='arquivadas'?'Desarquivar':'Arquivar'}</button><button class="btn btn-sm btn-danger" id="bulkDelete">Excluir</button></div>` : ''}
+  ${state.selectedOpps.length ? `<div class="bulk-bar"><span class="badge badge-blue">${state.selectedOpps.length} selecionada${state.selectedOpps.length===1?'':'s'}</span><select class="input bulk-select" id="bulkFolder"><option value="">Adicionar a uma pasta…</option>${state.folders.map(folder=>`<option value="${folder.id}">${esc(folder.nome)}</option>`).join('')}</select><button class="btn btn-sm" id="bulkAddFolder" ${state.folders.length?'':'disabled'}>Adicionar</button>${currentFolder?`<button class="btn btn-sm" id="bulkRemoveFolder">Remover desta pasta</button>`:''}<span style="flex:1"></span><button class="btn btn-sm" id="bulkReanalyze">Reanalisar</button><button class="btn btn-sm" id="bulkMonitor">Monitorar</button><button class="btn btn-sm" id="bulkStatus">Priorizar</button><button class="btn btn-sm" id="bulkArchive">${f.archive==='arquivadas'?'Desarquivar':'Arquivar'}</button><button class="btn btn-sm btn-danger" id="bulkDelete">Excluir</button></div>` : ''}
 
   ${state.oppFilterOpen?`
     <div class="filter-scrim" id="closeOppFilters"></div>
@@ -1673,6 +1673,7 @@ function renderDiagnostico(){
         <div class="muted" style="font-size:11.5px;margin-top:8px;">Última atualização: ${c.ultimaAtualizacao} · Endereço: ${c.endereco}</div>
       </div>
       <div class="row gap-8" style="flex:0 0 auto;">
+        <button class="btn" id="reanalyzeCompanyBtn">${icon('target')} Reanalisar</button>
         <button class="btn" id="monitorBtn">${icon('eye')} Monitorar empresa</button>
         <button class="btn btn-primary" id="prepBtn">${icon('zap')} Preparar abordagem</button>
       </div>
@@ -1842,6 +1843,26 @@ async function edgeFunctionErrorMessage(error){
   }
   return message;
 }
+async function reanalyzeOpportunities(companyIds,button){
+  const ids=Array.isArray(companyIds)?[...new Set(companyIds.filter(Boolean))]:[];
+  if(button){ button.disabled=true; button.dataset.originalText=button.textContent; button.textContent='Reanalisando…'; }
+  try{
+    const {data,error}=await sb.functions.invoke('reanalyze-opportunities',{body:ids.length?{company_ids:ids}:{}});
+    if(error) throw new Error(await edgeFunctionErrorMessage(error));
+    if(data&&data.error) throw new Error(data.error);
+    await loadAllData(state.userId);
+    const updated=Number(data&&data.updated)||0;
+    const failed=Array.isArray(data&&data.failed)?data.failed.length:0;
+    const suffix=failed?` ${failed} não puderam ser atualizadas.`:' Nenhuma nova consulta externa foi realizada.';
+    toast(`${updated} oportunidade${updated===1?'':'s'} reanalisada${updated===1?'':'s'}.${suffix}`);
+    return data;
+  }catch(error){
+    toast('Não foi possível reanalisar: '+((error&&error.message)||'tente novamente.'));
+    return null;
+  }finally{
+    if(button&&document.body.contains(button)){ button.disabled=false; button.textContent=button.dataset.originalText||'Reanalisar'; }
+  }
+}
 async function runSiteAudit(){
   const company=state.companies.find(item=>item.id===currentDiagId);
   const button=document.getElementById('auditSiteBtn');
@@ -1894,6 +1915,8 @@ function bindDiagnostico(){
   });
   const auditSiteBtn=document.getElementById('auditSiteBtn');
   if(auditSiteBtn) auditSiteBtn.addEventListener('click',runSiteAudit);
+  const reanalyzeCompanyBtn=document.getElementById('reanalyzeCompanyBtn');
+  if(reanalyzeCompanyBtn) reanalyzeCompanyBtn.addEventListener('click',()=>reanalyzeOpportunities([currentDiagId],reanalyzeCompanyBtn));
   document.querySelectorAll('[data-setstatus]').forEach(el=>{
     el.addEventListener('click', async ()=>{
       const c = state.companies.find(x=>x.id===currentDiagId);
@@ -2122,6 +2145,7 @@ function renderOfferCatalog(){
     </div>`;
   }).join('');
   return `${editorHtml}
+    <div class="verification-note" style="margin-bottom:16px;"><div class="row between wrap" style="gap:12px;"><div><b style="display:block;color:var(--text);margin-bottom:4px;">Atualize as recomendações sem fazer uma nova busca</b><span>Recalcula score, potencial e encaixe usando somente os dados já coletados e os produtos ativos da esteira.</span></div><button class="btn btn-sm" id="reanalyzeAllOffers">Reanalisar oportunidades</button></div></div>
     <div class="row between wrap" style="margin-bottom:14px;"><div><div class="card-title">Esteira de produtos</div><div class="card-sub">Organize o que vender primeiro, depois e de forma recorrente.</div></div><button class="btn btn-primary btn-sm" id="newOffer">${icon('plus')} Novo produto</button></div>
     ${state.offers.length?`<div class="grid" style="grid-template-columns:repeat(4,minmax(190px,1fr));gap:10px;overflow-x:auto;">${columns}</div>`:`<div class="empty" style="padding:34px 10px;border:1px dashed var(--border);border-radius:10px;"><h4>Sua esteira ainda está vazia</h4><p>Cadastre a primeira oferta para conectá-la aos próximos radares.</p></div>`}`;
 }
@@ -2352,6 +2376,12 @@ function bindOportunidades(){
     ids.forEach(id=>{ const c=state.companies.find(x=>x.id===id); if(c) c.monitorada=true; });
     toast(ids.length+' empresas marcadas para monitoramento.'); state.selectedOpps=[]; render();
   });
+  const bulkReanalyze=document.getElementById('bulkReanalyze');
+  if(bulkReanalyze) bulkReanalyze.addEventListener('click',async()=>{
+    const ids=state.selectedOpps.slice();
+    const result=await reanalyzeOpportunities(ids,bulkReanalyze);
+    if(result){ state.selectedOpps=[]; render(); }
+  });
   const bs = document.getElementById('bulkStatus');
   if(bs) bs.addEventListener('click', async ()=>{
     const ids = state.selectedOpps.slice();
@@ -2436,6 +2466,8 @@ function bindConfiguracoes(){
     nome:'',resultado:'',descricao:'',ticketMin:null,ticketMax:null,ativo:true,tipo:'servico',
     etapa:'entrada',modeloCobranca:'unico',publicoAlvo:'',categorias:[],sinais:[],prioridade:50,posicao:state.offers.length,
   }}));
+  const reanalyzeAllOffers=document.getElementById('reanalyzeAllOffers');
+  if(reanalyzeAllOffers) reanalyzeAllOffers.addEventListener('click',()=>reanalyzeOpportunities([],reanalyzeAllOffers));
   const cancelOffer=document.getElementById('cancelOffer');
   if(cancelOffer) cancelOffer.addEventListener('click',()=>setState({offerEditor:null}));
   document.querySelectorAll('[data-offer-edit]').forEach(button=>button.addEventListener('click',()=>{
