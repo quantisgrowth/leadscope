@@ -189,7 +189,19 @@ tr.row-hover:hover{background:var(--hover);}
 .filter-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:999px;padding:5px 9px;font:inherit;font-size:12px;cursor:pointer;max-width:260px;}
 .filter-chip:hover{background:var(--hover);}
 .bulk-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;margin-bottom:14px;border:1px solid color-mix(in srgb,var(--blue) 35%,var(--border));background:color-mix(in srgb,var(--blue) 8%,var(--card));border-radius:12px;}
-.folder-strip{display:flex;align-items:center;gap:7px;overflow-x:auto;padding:2px 0 12px;margin-bottom:2px;scrollbar-width:thin;}
+.folder-strip{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:2px 0 12px;margin-bottom:2px;}
+.folder-picker{position:relative;min-width:0;max-width:100%;}
+.folder-menu-row[hidden]{display:none;}
+.folder-menu{max-height:70vh;overflow-y:auto;box-sizing:border-box;}
+.folder-picker summary{list-style:none;max-width:100%;}.folder-picker summary::-webkit-details-marker{display:none;}
+.folder-selected-name{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.folder-menu{position:absolute;top:calc(100% + 8px);left:0;width:340px;max-width:calc(100vw - 48px);z-index:35;padding:12px;border:1px solid var(--border);border-radius:14px;background:var(--card);box-shadow:0 12px 36px rgba(0,0,0,.18);}
+.folder-menu-list{max-height:280px;overflow-y:auto;margin:10px 0;}.folder-menu-row{display:flex;align-items:center;gap:5px;border-radius:8px;}.folder-menu-row:hover{background:var(--hover);}
+.folder-menu-choice{display:flex;align-items:center;gap:8px;min-width:0;flex:1;text-align:left;padding:10px 7px;border:0;background:transparent;color:var(--text);font:inherit;font-size:13px;cursor:pointer;}.folder-menu-choice .folder-selected-name{flex:1;}.folder-menu-choice[aria-current="true"]{color:var(--blue-light);font-weight:600;}
+.folder-favorite{border:0;background:transparent;color:var(--text-secondary);font-size:20px;cursor:pointer;padding:8px;}.folder-favorite[aria-pressed="true"]{color:var(--blue-light);}
+.folder-menu-footer{display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:10px;}
+.folder-manager{width:560px;max-width:calc(100vw - 32px);max-height:80vh;border:1px solid var(--border);border-radius:16px;padding:20px;background:var(--card);color:var(--text);}.folder-manager::backdrop{background:rgba(0,0,0,.4);}.folder-manager-list{max-height:55vh;overflow-y:auto;}.folder-manager-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 0;border-bottom:1px solid var(--border);}.folder-manager-name{flex:1;min-width:120px;overflow-wrap:anywhere;}
+@media(max-width:600px){.folder-picker{flex-basis:100%;}.folder-menu{width:100%;max-width:100%;box-sizing:border-box;}.folder-selected-name{max-width:220px;}}
 .folder-view{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:6px 10px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--text-secondary);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
 .folder-view:hover{background:var(--hover);color:var(--text);}.folder-view.active{border-color:var(--blue);color:var(--blue-light);background:color-mix(in srgb,var(--blue) 10%,var(--card));}
 .folder-dot{width:8px;height:8px;border-radius:50%;background:var(--folder-color,var(--blue));flex:0 0 auto;}.folder-count{font-size:11px;color:var(--text-secondary);}
@@ -1552,6 +1564,27 @@ function companyOffer(c){
 }
 function activeCompanies(){ return state.companies.filter(company=>!company.archivedAt); }
 function folderCompanyCount(folderId){ return activeCompanies().filter(company=>(company.folderIds||[]).includes(folderId)).length; }
+function folderFavorites(){
+  try{const value=JSON.parse(localStorage.getItem('leadscope_folder_favorites_'+(state.authUserId||state.userId))||'[]');return Array.isArray(value)?value.filter(id=>state.folders.some(folder=>folder.id===id)).slice(0,3):[];}catch{return [];}
+}
+function folderSearchKey(value){return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();}
+document.addEventListener('click',event=>{const picker=document.getElementById('oppFolderPicker');if(event.target.isConnected&&picker?.open&&!picker.contains(event.target))picker.open=false;});
+document.addEventListener('keydown',event=>{const picker=document.getElementById('oppFolderPicker');if(event.key==='Escape'&&picker?.open){picker.open=false;picker.querySelector('summary').focus();}});
+function renderFolderPicker(currentFolder){
+  const favorites=folderFavorites();
+  const folders=[...state.folders].sort((a,b)=>Number(favorites.includes(b.id))-Number(favorites.includes(a.id))||a.nome.localeCompare(b.nome,'pt-BR'));
+  return `<details class="folder-picker" id="oppFolderPicker"><summary class="folder-view ${currentFolder?'active':''}" aria-label="Escolher pasta"><span aria-hidden="true">▱</span><span class="folder-selected-name">${currentFolder?esc(currentFolder.nome):'Pastas'}</span>${currentFolder?`<span class="folder-count">${folderCompanyCount(currentFolder.id)}</span>`:''}<span aria-hidden="true">▾</span></summary>
+    <div class="folder-menu"><label class="label" for="folderMenuSearch">Buscar pasta</label><input class="input" id="folderMenuSearch" placeholder="Nome da pasta…" autocomplete="off"><div class="muted" style="font-size:11px;margin-top:8px;">Favorite até 3 pastas para colocá-las no início.</div>
+    <div class="folder-menu-list">${folders.map(folder=>`<div class="folder-menu-row" data-folder-search="${esc(folderSearchKey(folder.nome))}"><button class="folder-menu-choice" data-folder-view="${esc(folder.id)}" data-archive-view="ativas" aria-current="${currentFolder?.id===folder.id}" style="--folder-color:${esc(folder.cor)}"><span class="folder-dot"></span><span class="folder-selected-name" title="${esc(folder.nome)}">${esc(folder.nome)}</span><span class="folder-count">${folderCompanyCount(folder.id)}</span></button><button class="folder-favorite" data-favorite-folder="${esc(folder.id)}" aria-pressed="${favorites.includes(folder.id)}" aria-label="${favorites.includes(folder.id)?'Desfavoritar':'Favoritar'} ${esc(folder.nome)}">${favorites.includes(folder.id)?'★':'☆'}</button></div>`).join('')}</div>
+    <p class="muted" id="folderSearchEmpty" ${folders.length?'hidden':''}>${folders.length?'Nenhuma pasta com esse nome.':'Você ainda não criou pastas.'}</p>
+    <div class="folder-menu-footer">${!state.readOnly?'<button class="btn btn-sm" id="newOppFolder">＋ Criar pasta</button>':''}<button class="btn btn-sm" id="manageOppFolders">${state.readOnly?'Ver pastas':'Gerenciar pastas'}</button></div></div></details>
+    <dialog class="folder-manager" id="oppFolderManager" aria-labelledby="folderManagerTitle"><div class="row between"><h3 id="folderManagerTitle">${state.readOnly?'Pastas':'Gerenciar pastas'}</h3><button class="icon-btn" id="closeFolderManager" aria-label="Fechar gerenciamento de pastas">×</button></div><p class="muted">Excluir uma pasta não exclui as empresas ou o histórico.</p><div class="folder-manager-list">${folders.map(folder=>`<div class="folder-manager-row"><span class="folder-manager-name">${esc(folder.nome)} <span class="folder-count">(${folderCompanyCount(folder.id)})</span></span>${!state.readOnly?`<button class="btn btn-sm" data-rename-folder="${esc(folder.id)}">Renomear</button><button class="btn btn-sm btn-danger" data-delete-folder="${esc(folder.id)}">Excluir pasta</button>`:''}</div>`).join('')||'<p class="muted">Nenhuma pasta cadastrada.</p>'}</div></dialog>`;
+}
+function renderOpportunityEmpty(){
+  const folder=state.folders.find(item=>item.id===state.oppFilters.folderId);
+  const emptyFolder=folder&&folderCompanyCount(folder.id)===0&&state.oppFilters.archive==='ativas';
+  return `<div class="card empty">${icon('target')}<h4>${emptyFolder?'Esta pasta ainda não tem empresas':'Nenhuma oportunidade encontrada'}</h4><p>${emptyFolder?'Selecione empresas em Todas e use Adicionar a uma pasta.':'Ajuste os filtros para ver mais resultados.'}</p><button class="btn btn-primary" id="viewAllOpportunities">Ver todas as oportunidades</button></div>`;
+}
 function opportunityDataset(){
   const f=state.oppFilters;
   let list=state.companies.slice();
@@ -1584,7 +1617,6 @@ function opportunityDataset(){
 }
 function opportunityFilterChips(f){
   const offer=state.offers.find(item=>item.id===f.offerId);
-  const folder=state.folders.find(item=>item.id===f.folderId);
   const typeLabel=OFFER_TYPES[f.offerType];
   const values=[
     ['search',f.search&&`Busca: ${f.search}`], ['createdFrom',f.createdFrom&&`Criada desde ${f.createdFrom.split('-').reverse().join('/')}`],
@@ -1593,7 +1625,7 @@ function opportunityFilterChips(f){
     ['scoreMax',f.scoreMax!==''&&`Score máximo ${f.scoreMax}`], ['potencial',f.potencial!=='todos'&&`Potencial: ${f.potencial}`],
     ['offerId',offer&&`Produto: ${offer.nome}`], ['offerType',typeLabel&&`Tipo: ${typeLabel}`], ['status',f.status!=='todos'&&`Status: ${f.status}`],
     ['segmento',f.segmento!=='todos'&&`Segmento: ${f.segmento}`], ['cidade',f.cidade!=='todos'&&`Local: ${f.cidade}`],
-    ['folderId',f.folderId==='sem_pasta'?'Sem pasta':folder&&`Pasta: ${folder.nome}`], ['archive',f.archive==='arquivadas'?'Arquivadas':f.archive==='todas'?'Ativas e arquivadas':''],
+    ['folderId',f.folderId==='sem_pasta'&&f.archive!=='ativas'?'Sem pasta':''], ['archive',f.archive==='todas'?'Ativas e arquivadas':''],
   ];
   return values.filter(item=>item[1]);
 }
@@ -1630,10 +1662,8 @@ function renderOportunidades(){
   <div class="folder-strip" aria-label="Visualizações de oportunidades">
     <button class="folder-view ${f.folderId==='todos'&&f.archive==='ativas'?'active':''}" data-folder-view="todos" data-archive-view="ativas">Todas <span class="folder-count">${activeTotal}</span></button>
     <button class="folder-view ${f.folderId==='sem_pasta'&&f.archive==='ativas'?'active':''}" data-folder-view="sem_pasta" data-archive-view="ativas">Sem pasta <span class="folder-count">${withoutFolderTotal}</span></button>
-    ${state.folders.map(folder=>`<button class="folder-view ${f.folderId===folder.id&&f.archive==='ativas'?'active':''}" data-folder-view="${folder.id}" data-archive-view="ativas" style="--folder-color:${esc(folder.cor)}"><span class="folder-dot"></span>${esc(folder.nome)} <span class="folder-count">${folderCompanyCount(folder.id)}</span></button>`).join('')}
     <button class="folder-view ${f.archive==='arquivadas'?'active':''}" data-folder-view="todos" data-archive-view="arquivadas">Arquivadas <span class="folder-count">${archivedTotal}</span></button>
-    <button class="folder-view" id="newOppFolder">＋ Nova pasta</button>
-    ${currentFolder?`<button class="folder-view" id="renameOppFolder" title="Renomear pasta">Renomear</button><button class="folder-view btn-danger" id="deleteOppFolder" title="Excluir apenas a pasta">Excluir pasta</button>`:''}
+    ${renderFolderPicker(currentFolder)}
   </div>
 
   <div class="card opp-toolbar">
@@ -1672,7 +1702,7 @@ function statusColor(status){
   return 'badge-gray';
 }
 function renderOppTable(list){
-  if(!list.length) return `<div class="card empty">${icon('target')}<h4>Nenhuma oportunidade encontrada</h4><p>Ajuste os filtros ou crie um novo radar para encontrar empresas.</p><button class="btn btn-primary" data-nav="#/radar">Criar radar</button></div>`;
+  if(!list.length) return renderOpportunityEmpty();
   return `
   <div class="card" style="padding:0;">
     <div class="table-scroll">
@@ -1704,7 +1734,7 @@ function renderOppTable(list){
   </div>`;
 }
 function renderOppCards(list){
-  if(!list.length) return `<div class="card empty">${icon('target')}<h4>Nenhuma oportunidade encontrada</h4><p>Ajuste os filtros para ver mais resultados.</p></div>`;
+  if(!list.length) return renderOpportunityEmpty();
   return `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));">
     ${list.map(c=>`
       <div class="card">
@@ -1724,7 +1754,7 @@ function renderOppCards(list){
   </div>`;
 }
 function renderOppFunnel(list){
-  if(!list.length) return `<div class="card empty">${icon('target')}<h4>Nenhuma oportunidade encontrada</h4><p>Ajuste os filtros para preencher o funil.</p></div>`;
+  if(!list.length) return renderOpportunityEmpty();
   return `<div class="funnel-board" aria-label="Funil comercial">
     ${COMMERCIAL_STAGES.map(stage=>{
       const companies=list.filter(company=>(company.status||'Nova')===stage);
@@ -2515,6 +2545,26 @@ function bindOportunidades(){
     state.oppFilters=Object.assign({},JSON.parse(JSON.stringify(DEFAULT_OPP_FILTERS)),layout);
     state.selectedOpps=[];
   };
+  const picker=document.getElementById('oppFolderPicker'),folderSearch=document.getElementById('folderMenuSearch');
+  if(picker) picker.addEventListener('toggle',()=>{if(picker.open)folderSearch?.focus();});
+  if(folderSearch)folderSearch.addEventListener('input',()=>{
+    const query=folderSearchKey(folderSearch.value);let matches=0;
+    document.querySelectorAll('[data-folder-search]').forEach(row=>{row.hidden=!row.dataset.folderSearch.includes(query);if(!row.hidden)matches++;});
+    document.getElementById('folderSearchEmpty').hidden=matches>0;
+  });
+  document.querySelectorAll('[data-favorite-folder]').forEach(button=>button.addEventListener('click',()=>{
+    const id=button.dataset.favoriteFolder,favorites=folderFavorites(),exists=favorites.includes(id);
+    if(!exists&&favorites.length>=3){toast('Você pode favoritar até 3 pastas. Remova uma favorita primeiro.');return;}
+    try{localStorage.setItem('leadscope_folder_favorites_'+(state.authUserId||state.userId),JSON.stringify(exists?favorites.filter(value=>value!==id):[...favorites,id]));}catch{toast('Não foi possível salvar suas favoritas neste navegador.');return;}
+    const query=folderSearch.value;render();
+    document.getElementById('oppFolderPicker').open=true;
+    const input=document.getElementById('folderMenuSearch');input.value=query;input.dispatchEvent(new Event('input'));
+  }));
+  const manager=document.getElementById('oppFolderManager');
+  document.getElementById('manageOppFolders')?.addEventListener('click',()=>{picker.open=false;manager.showModal();});
+  document.getElementById('closeFolderManager')?.addEventListener('click',()=>manager.close());
+  manager?.addEventListener('click',event=>{if(event.target===manager){const bounds=manager.getBoundingClientRect();if(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom)manager.close();}});
+  document.getElementById('viewAllOpportunities')?.addEventListener('click',()=>{resetOpportunityFilters();setState({});});
   const vt = document.getElementById('viewTabela'), vc = document.getElementById('viewCards'), vf=document.getElementById('viewFunnel');
   if(vt) vt.addEventListener('click', ()=>{ state.oppFilters.view='tabela'; setState({}); });
   if(vc) vc.addEventListener('click', ()=>{ state.oppFilters.view='cards'; setState({}); });
@@ -2537,6 +2587,7 @@ function bindOportunidades(){
   }));
   const newFolder=document.getElementById('newOppFolder');
   if(newFolder) newFolder.addEventListener('click',async()=>{
+    if(state.readOnly)return;
     const name=(window.prompt('Nome da nova pasta:')||'').trim();
     if(!name) return;
     const {data,error}=await sb.from('opportunity_folders').insert({user_id:state.userId,nome:name}).select('*').single();
@@ -2545,23 +2596,25 @@ function bindOportunidades(){
     state.oppFilters.folderId=data.id; state.oppFilters.archive='ativas'; state.oppFilters.page=1; setState({});
   });
   const activeFolder=state.folders.find(folder=>folder.id===state.oppFilters.folderId);
-  const renameFolder=document.getElementById('renameOppFolder');
-  if(renameFolder&&activeFolder) renameFolder.addEventListener('click',async()=>{
+  document.querySelectorAll('[data-rename-folder]').forEach(renameFolder=>renameFolder.addEventListener('click',async()=>{
+    const activeFolder=state.folders.find(folder=>folder.id===renameFolder.dataset.renameFolder);
+    if(state.readOnly||!activeFolder)return;
     const name=(window.prompt('Novo nome da pasta:',activeFolder.nome)||'').trim();
     if(!name||name===activeFolder.nome) return;
     const {error}=await sb.from('opportunity_folders').update({nome:name,updated_at:new Date().toISOString()}).eq('id',activeFolder.id).eq('user_id',state.userId);
     if(error){ toast(error.code==='23505'?'Já existe uma pasta com esse nome.':'Não foi possível renomear a pasta.'); return; }
     activeFolder.nome=name; setState({}); toast('Pasta renomeada.');
-  });
-  const deleteFolder=document.getElementById('deleteOppFolder');
-  if(deleteFolder&&activeFolder) deleteFolder.addEventListener('click',async()=>{
+  }));
+  document.querySelectorAll('[data-delete-folder]').forEach(deleteFolder=>deleteFolder.addEventListener('click',async()=>{
+    const activeFolder=state.folders.find(folder=>folder.id===deleteFolder.dataset.deleteFolder);
+    if(state.readOnly||!activeFolder)return;
     if(!window.confirm(`Excluir a pasta “${activeFolder.nome}”? As empresas não serão excluídas.`)) return;
     const {error}=await sb.from('opportunity_folders').delete().eq('id',activeFolder.id).eq('user_id',state.userId);
     if(error){ toast('Não foi possível excluir a pasta.'); return; }
     state.folders=state.folders.filter(folder=>folder.id!==activeFolder.id);
     state.companies.forEach(company=>{ company.folderIds=(company.folderIds||[]).filter(id=>id!==activeFolder.id); });
-    state.oppFilters.folderId='todos'; state.oppFilters.page=1; setState({}); toast('Pasta excluída; as empresas foram preservadas.');
-  });
+    if(state.oppFilters.folderId===activeFolder.id)state.oppFilters.folderId='todos'; state.oppFilters.page=1; setState({}); toast('Pasta excluída; as empresas foram preservadas.');
+  }));
   const sort=document.getElementById('fSort');
   if(sort) sort.addEventListener('change',()=>{ state.oppFilters.sort=sort.value; state.oppFilters.page=1; setState({}); });
   const search=document.getElementById('fSearch');

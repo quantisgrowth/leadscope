@@ -40,6 +40,7 @@ jobs:
           node tests/phase4.mjs
           node tests/team-and-history.mjs
           node tests/manual-registration.mjs
+          node tests/folder-navigation.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 2.119.0
