@@ -118,7 +118,8 @@ async function apifyRequest(path: string, token: string, init?: RequestInit) {
     } catch {
       // A mensagem genérica evita expor respostas completas do provedor.
     }
-    throw new Error([`Apify respondeu com status ${response.status}.`, detail].filter(Boolean).join(" "));
+    console.error(JSON.stringify({ event: "site_provider_http_error", status: response.status, detail }));
+    throw new Error(`O serviço de auditoria respondeu com status ${response.status}.`);
   }
   return response.json();
 }
@@ -147,7 +148,7 @@ export default {
   fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
     if (req.method !== "POST") return Response.json({ error: "Método não permitido" }, { status: 405 });
     const token = Deno.env.get("APIFY_API_TOKEN");
-    if (!token) return Response.json({ error: "Integração do Apify ainda não foi configurada no Supabase." }, { status: 503 });
+    if (!token) return Response.json({ error: "O serviço de auditoria ainda não foi configurado." }, { status: 503 });
 
     let auditId: string | null = null;
     try {
@@ -190,7 +191,7 @@ export default {
           }),
         });
         const run = payload?.data;
-        if (!run?.id) throw new Error("O Apify não retornou a identificação da auditoria.");
+        if (!run?.id) throw new Error("O serviço não retornou a identificação da auditoria.");
         await ctx.supabase.from("site_audits").update({
           status: "processando", provider_run_id: run.id, provider_dataset_id: run.defaultDatasetId ?? null,
         }).eq("id", auditId);
@@ -203,18 +204,18 @@ export default {
       if (auditError || !audit) return Response.json({ error: "Auditoria não encontrada." }, { status: 404 });
       if (audit.status === "concluido") return Response.json({ status: "concluido", audit });
       if (audit.status === "falhou") return Response.json({ status: "falhou", error: audit.error || "A auditoria falhou." }, { status: 500 });
-      if (!audit.provider_run_id) throw new Error("A auditoria não possui uma execução vinculada no Apify.");
+      if (!audit.provider_run_id) throw new Error("A auditoria não possui uma execução vinculada.");
 
       const runPayload = await apifyRequest(`actor-runs/${audit.provider_run_id}`, token);
       const run = runPayload?.data;
       const providerStatus = cleanText(run?.status, 40) || "UNKNOWN";
-      if (["FAILED", "TIMED-OUT", "ABORTED"].includes(providerStatus)) throw new Error(`A auditoria do Apify terminou com status ${providerStatus}.`);
+      if (["FAILED", "TIMED-OUT", "ABORTED"].includes(providerStatus)) throw new Error(`A auditoria terminou com status ${providerStatus}.`);
       if (providerStatus !== "SUCCEEDED") return Response.json({ status: "processando", provider_status: providerStatus, audit_id: auditId }, { status: 202 });
 
       const datasetId = run?.defaultDatasetId || audit.provider_dataset_id;
-      if (!datasetId) throw new Error("O Apify concluiu sem disponibilizar o resultado da auditoria.");
+      if (!datasetId) throw new Error("A auditoria foi concluída sem disponibilizar o resultado técnico.");
       const items = await apifyRequest(`datasets/${datasetId}/items?clean=true&format=json&limit=1`, token);
-      if (!Array.isArray(items) || !items.length) throw new Error("Nenhum resultado técnico foi retornado pelo Apify.");
+      if (!Array.isArray(items) || !items.length) throw new Error("Nenhum resultado técnico foi retornado pelo serviço de auditoria.");
       const item = items[0] as Record<string, any>;
       const technical = decodeAuditPayload(item);
       const checks = technical.checks as Record<string, boolean>;

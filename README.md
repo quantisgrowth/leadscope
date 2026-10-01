@@ -11,6 +11,9 @@ Plataforma de inteligência comercial para agências, prestadores de serviços e
 - Score inicial explicável em cinco dimensões: perfil, oportunidade, reputação, contato e confiança.
 - Catálogo de produtos organizado em uma esteira de entrada, oferta principal, expansão e recorrência.
 - Seleção de produtos por radar e recomendação explicável de oferta para cada empresa encontrada.
+- Funil comercial com histórico imutável de movimentações e visões em tabela, cards ou etapas.
+- Pastas, arquivamento e ações em massa para organizar a operação comercial.
+- Área de integrações restrita ao administrador da plataforma; nomes de fornecedores não aparecem para usuários comuns.
 - RLS e permissões para cada usuário acessar somente os próprios dados.
 - Preservação dos dados existentes durante a migração.
 

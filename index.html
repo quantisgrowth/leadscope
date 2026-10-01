@@ -194,6 +194,13 @@ tr.row-hover:hover{background:var(--hover);}
 .folder-dot{width:8px;height:8px;border-radius:50%;background:var(--folder-color,var(--blue));flex:0 0 auto;}.folder-count{font-size:11px;color:var(--text-secondary);}
 .bulk-select{min-width:170px;max-width:230px;padding:7px 9px;font-size:12.5px;}
 .btn-danger{color:var(--error);border-color:color-mix(in srgb,var(--error) 42%,var(--border));}.btn-danger:hover{background:color-mix(in srgb,var(--error) 10%,transparent);border-color:var(--error);}
+.funnel-board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(260px,1fr);gap:12px;overflow-x:auto;padding:2px 1px 12px;scrollbar-width:thin;}
+.funnel-column{min-height:220px;border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb,var(--card) 88%,var(--bg));padding:10px;}
+.funnel-column-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 2px 10px;font-size:12.5px;font-weight:700;}
+.funnel-card{border:1px solid var(--border);border-radius:10px;background:var(--card);padding:11px;margin-bottom:8px;box-shadow:0 1px 1px rgba(0,0,0,.04);}
+.funnel-card:last-child{margin-bottom:0}.funnel-card:hover{border-color:color-mix(in srgb,var(--blue) 45%,var(--border));}
+.timeline{position:relative;padding-left:20px}.timeline:before{content:"";position:absolute;left:6px;top:7px;bottom:7px;width:1px;background:var(--border);}
+.timeline-item{position:relative;padding:0 0 14px}.timeline-item:last-child{padding-bottom:0}.timeline-item:before{content:"";position:absolute;left:-18px;top:5px;width:9px;height:9px;border-radius:50%;background:var(--blue);box-shadow:0 0 0 3px var(--card);}
 .filter-scrim{position:fixed;inset:0;background:var(--scrim);z-index:110;animation:fadein .15s ease;}
 .filter-drawer{position:fixed;right:0;top:0;bottom:0;width:min(440px,94vw);background:var(--bg);border-left:1px solid var(--border);z-index:120;display:flex;flex-direction:column;box-shadow:var(--shadow);animation:drawerIn .2s ease;}
 .filter-drawer-head{padding:20px 20px 15px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
@@ -308,6 +315,7 @@ const OFFER_STAGES = [
 ];
 const OFFER_TYPES = {servico:'Serviço',produto:'Produto',software:'Software',recorrencia:'Recorrência'};
 const BILLING_MODELS = {unico:'Pagamento único',mensal:'Mensal',anual:'Anual',sob_consulta:'Sob consulta'};
+const COMMERCIAL_STAGES = ['Nova','Em análise','Priorizada','Abordagem preparada','Contatada','Respondeu','Reunião agendada','Cliente','Descartada'];
 const CURATED_BUSINESS_CATEGORIES = [
   'Academia','Advogado','Agência de marketing','Arquiteto','Autoescola','Clínica de estética',
   'Clínica médica','Clínica odontológica','Construtora','Contabilidade','Corretora de imóveis',
@@ -323,6 +331,7 @@ let radarOfferIds = null;
 function classificacao(score){ if(score>=80) return {label:'Alto potencial', color:'var(--blue)'}; if(score>=60) return {label:'Potencial relevante', color:'var(--blue-light)'}; if(score>=40) return {label:'Acompanhar', color:'var(--warn)'}; return {label:'Baixa prioridade', color:'var(--text-secondary)'}; }
 function potencialBand(score){ return score>=70?'alto':score>=40?'medio':'baixo'; }
 function fmtDate(d){ return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+function fmtDateTime(value){ const d=new Date(value); return Number.isNaN(d.getTime())?'—':d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
 function normalizeText(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
 
 function formatOpeningHours(sourcePayload){
@@ -374,6 +383,13 @@ function recommendationReason(offer, compatibility){
   return `Aderência estimada em ${Number(compatibility)||0}% a partir da atividade e do público-alvo cadastrados.${result?` Resultado a validar: ${result}.`:''}`;
 }
 
+function publicSourceLabel(source){
+  const normalized=normalizeText(source);
+  if(!normalized) return 'Fonte pública verificada';
+  if(normalized.includes('apify')||normalized.includes('google maps')||normalized.includes('google places')) return 'Perfil comercial público';
+  return source;
+}
+
 function rowToOffer(row){
   return {
     id:row.id, nome:row.nome||'', resultado:row.resultado||'', descricao:row.descricao||'',
@@ -394,17 +410,17 @@ function formatOfferPrice(offer){
 }
 
 // Converte uma linha da tabela `empresas` (+ suas `evidencias`) no formato que as telas usam.
-function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds){
+function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds, offerMatches, statusHistory){
   const rawSignals = sinaisFromKeys(row.sinais_keys);
-  const sourceLabel=row.source_provider==='google_maps'?'Google Maps via Apify':'Fonte pública';
+  const sourceLabel=row.source_provider==='google_maps'?'Perfil comercial público':'Fonte pública verificada';
   if(!rawSignals.length) rawSignals.push({key:'perfilPublico', texto:'Estabelecimento localizado em uma fonte pública', fonte:sourceLabel, interpretacao:'Há dados públicos suficientes para iniciar uma qualificação comercial', servico:4});
   const offer=offerMatch&&offerMatch.offer;
   const sinais=contextualSignals(rawSignals,offer);
-  const contextualMatch=offerMatch?Object.assign({},offerMatch,{motivo:recommendationReason(offer,offerMatch.compatibilidade)}):null;
+  const contextualMatch=offerMatch?Object.assign({},offerMatch,{motivo:offerMatch.motivo||recommendationReason(offer,offerMatch.compatibilidade)}):null;
   const legacyAgencyRecommendation=/cria[cç][aã]o de site|presen[cç]a digital|otimiza[cç][aã]o da presen[cç]a/i.test(row.servico_recomendado||'');
   const recommendedOffer=(offer&&offer.nome)||(!legacyAgencyRecommendation&&row.servico_recomendado)||'Nenhuma oferta compatível definida';
   const evidencias = (evidenciaRows||[]).map(e=>({
-    texto:e.texto, fonte:e.fonte,
+    texto:e.texto, fonte:publicSourceLabel(e.fonte),
     data: e.data ? fmtDate(new Date(e.data+'T00:00:00')) : '',
     confianca:e.confianca,
   }));
@@ -422,6 +438,8 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds){
     interpretacoes:[...new Set(sinais.map(s=>s.interpretacao))].slice(0,3),
     servicoRecomendado: recommendedOffer,
     offerRecommendation:contextualMatch,
+    offerMatches:(offerMatches||[]).map(match=>Object.assign({},match,{motivo:match.motivo||recommendationReason(match.offer,match.compatibilidade)})),
+    statusHistory:(statusHistory||[]).map(item=>({from:item.status_anterior,to:item.status_novo,at:item.changed_at,by:item.changed_by})),
     status: row.status,
     createdAt: row.created_at || null,
     analyzedAt: row.analisado_em || row.coletado_em || row.created_at || null,
@@ -552,8 +570,8 @@ let state = Object.assign({
   onboarding:{ empresa:'', site:'', segmento:'', cidade:'', servico:'', ticket:'', descricao:'', problema:'',
     segmentosDesejados:'', regiao:'', porte:'Pequeno e médio porte', palavrasChave:'', qtdOportunidades:'20',
     pesos:{ google:70, site:80, reputacao:60, contato:70, presenca:50, compatibilidade:75, urgencia:65 } },
-  user:{ nome:'', empresa:'', plano:'Plano Piloto', email:'', cargo:'Head Comercial' },
-  companies: [], folders:[],
+  user:{ nome:'', empresa:'', plano:'Plano Piloto', email:'', cargo:'Head Comercial', isPlatformAdmin:false },
+  companies: [], folders:[], integrations:[],
   radars: [],
   offers: [], offerEditor:null,
   selectedOpps:[], oppFilterOpen:false,
@@ -572,7 +590,7 @@ const setPath = setPathLocal;
 
 /* ================= SUPABASE: CARREGAR / GRAVAR DADOS ================= */
 async function loadAllData(userId){
-  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}, {data:siteAuditRows}, {data:offerRows}, {data:offerMatchRows}, {data:folderRows}, {data:folderLinkRows}] = await Promise.all([
+  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}, {data:siteAuditRows}, {data:offerRows}, {data:offerMatchRows}, {data:folderRows}, {data:folderLinkRows}, {data:statusHistoryRows}, {data:adminMarker}, {data:integrationRows}] = await Promise.all([
     sb.from('profiles').select('*').eq('id', userId).maybeSingle(),
     sb.from('account_settings').select('*').eq('user_id', userId).maybeSingle(),
     sb.from('radares').select('*').eq('user_id', userId).order('criado_em', {ascending:false}),
@@ -580,9 +598,12 @@ async function loadAllData(userId){
     sb.from('evidencias').select('*').order('data', {ascending:false}),
     sb.from('site_audits').select('*').eq('user_id', userId).order('created_at', {ascending:false}),
     sb.from('offers').select('*').eq('user_id', userId).order('posicao', {ascending:true}),
-    sb.from('company_offer_matches').select('*,offer:offers(*)').eq('user_id', userId).eq('principal', true).order('compatibilidade', {ascending:false}),
+    sb.from('company_offer_matches').select('*,offer:offers(*)').eq('user_id', userId).order('compatibilidade', {ascending:false}),
     sb.from('opportunity_folders').select('*').eq('user_id', userId).order('updated_at', {ascending:false}),
     sb.from('opportunity_folder_companies').select('folder_id,empresa_id').eq('user_id', userId),
+    sb.from('company_status_history').select('empresa_id,status_anterior,status_novo,changed_by,changed_at').eq('user_id', userId).order('changed_at', {ascending:false}),
+    sb.from('platform_admins').select('user_id').eq('user_id', userId).maybeSingle(),
+    sb.from('platform_integrations').select('key,display_name,description,connected,sort_order').order('sort_order', {ascending:true}),
   ]);
   const evByEmpresa = {};
   (evidenciasRows||[]).forEach(e=>{ (evByEmpresa[e.empresa_id] = evByEmpresa[e.empresa_id]||[]).push(e); });
@@ -592,25 +613,30 @@ async function loadAllData(userId){
   Object.entries(auditsByEmpresa).forEach(([empresaId,audits])=>{
     latestAuditByEmpresa[empresaId]=audits.find(audit=>['pendente','processando'].includes(audit.status))||audits.find(audit=>audit.status==='concluido')||audits[0];
   });
-  const matchByEmpresa={};
+  const matchesByEmpresa={};
   (offerMatchRows||[]).forEach(match=>{
     if(match.offer) match.offer=rowToOffer(match.offer);
-    if(!matchByEmpresa[match.empresa_id]) matchByEmpresa[match.empresa_id]=match;
+    (matchesByEmpresa[match.empresa_id]=matchesByEmpresa[match.empresa_id]||[]).push(match);
   });
+  const matchByEmpresa={};
+  Object.entries(matchesByEmpresa).forEach(([empresaId,matches])=>{ matchByEmpresa[empresaId]=matches.find(match=>match.principal)||matches[0]; });
   const foldersByCompany={};
   (folderLinkRows||[]).forEach(link=>{ (foldersByCompany[link.empresa_id]=foldersByCompany[link.empresa_id]||[]).push(link.folder_id); });
-  const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id], latestAuditByEmpresa[row.id], matchByEmpresa[row.id], foldersByCompany[row.id]));
+  const historyByCompany={};
+  (statusHistoryRows||[]).forEach(item=>{ (historyByCompany[item.empresa_id]=historyByCompany[item.empresa_id]||[]).push(item); });
+  const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id], latestAuditByEmpresa[row.id], matchByEmpresa[row.id], foldersByCompany[row.id], matchesByEmpresa[row.id], historyByCompany[row.id]));
   const ob = rowToOnboarding(settings) || state.onboarding;
   setState({
     userId,
     user: { nome: (profile&&profile.nome) || state.user.nome, empresa: ob.empresa || state.user.empresa,
       plano: (profile&&profile.plano) || 'Plano Piloto', email: (profile&&profile.email) || '',
-      cargo: (profile&&profile.cargo) || 'Head Comercial' },
+      cargo: (profile&&profile.cargo) || 'Head Comercial', isPlatformAdmin:!!adminMarker },
     onboarding: ob,
     onboarded: !!(settings && settings.onboarded),
     onboardStep: Math.max(1, Math.min(3, Number((settings&&settings.onboarding_step)||1))),
     companies,
     folders:(folderRows||[]).map(folder=>({id:folder.id,nome:folder.nome,cor:folder.cor||'#10a37f'})),
+    integrations:(integrationRows||[]).map(item=>({key:item.key,name:item.display_name,description:item.description,connected:!!item.connected})),
     offers:(offerRows||[]).map(rowToOffer),
     radars: (radaresRows||[]).map(r=>({id:r.id, nome:r.nome, segmento:r.segmento, cidade:r.cidade, query:r.query, localizacao:r.localizacao, status:r.status||'pendente', criadoEm: r.criado_em ? fmtDate(new Date(r.criado_em+'T00:00:00')) : ''})),
     loggedIn:true, booting:false,
@@ -629,7 +655,16 @@ async function persistSettingsPartial(){
   await sb.from('account_settings').update(onboardingToRow(state.onboarding)).eq('user_id', state.userId);
 }
 async function persistCompanyField(id, fields){
-  await sb.from('empresas').update(fields).eq('id', id);
+  const {error}=await sb.from('empresas').update(fields).eq('id', id).eq('user_id',state.userId);
+  if(error) throw error;
+}
+async function updateCompanyStatus(company, nextStatus){
+  if(!company||!nextStatus||company.status===nextStatus) return;
+  const previousStatus=company.status;
+  await persistCompanyField(company.id,{status:nextStatus});
+  company.status=nextStatus;
+  company.statusHistory=company.statusHistory||[];
+  company.statusHistory.unshift({from:previousStatus,to:nextStatus,at:new Date().toISOString(),by:state.userId});
 }
 
 /* ================= AUTENTICAÇÃO (Supabase Auth) ================= */
@@ -708,6 +743,7 @@ function icon(name, cls){
     check:'<path d="M20 6 9 17l-5-5"/>',
     x:'<path d="M18 6 6 18M6 6l12 12"/>',
     arrow:'<path d="M5 12h14M13 6l6 6-6 6"/>',
+    arrowLeft:'<path d="M19 12H5M11 6l-6 6 6 6"/>',
     globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
     phone:'<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1C10.5 20 4 13.5 4 5a1 1 0 0 1 1-1Z"/>',
     star:'<path d="M12 2.5l2.9 6 6.6.6-5 4.4 1.5 6.5L12 16.7 6 20l1.5-6.5-5-4.4 6.6-.6L12 2.5Z"/>',
@@ -1458,6 +1494,7 @@ function renderOportunidades(){
     <div class="row gap-8">
       <button class="btn btn-sm ${f.view==='tabela'?'btn-primary':''}" id="viewTabela">Tabela</button>
       <button class="btn btn-sm ${f.view==='cards'?'btn-primary':''}" id="viewCards">Cards</button>
+      <button class="btn btn-sm ${f.view==='funil'?'btn-primary':''}" id="viewFunnel">Funil</button>
       <button class="btn btn-sm" id="exportCsv">${icon('dl')} Exportar CSV</button>
     </div>
   </div>
@@ -1495,8 +1532,8 @@ function renderOportunidades(){
       <div class="filter-drawer-footer"><button class="btn" id="clearOppFiltersDrawer">Limpar filtros</button><button class="btn btn-primary" style="flex:1" id="applyOppFilters">Aplicar filtros</button></div>
     </aside>`:''}
 
-  ${f.view==='cards' ? renderOppCards(visible) : renderOppTable(visible)}
-  ${list.length?`<div class="row between wrap" style="margin-top:14px;"><span class="muted">Exibindo ${start+1}–${Math.min(start+pageSize,list.length)} de ${list.length}</span><div class="row gap-8"><button class="btn btn-sm" data-page="${f.page-1}" ${f.page<=1?'disabled':''}>Anterior</button><span class="badge badge-gray">${f.page} / ${pages}</span><button class="btn btn-sm" data-page="${f.page+1}" ${f.page>=pages?'disabled':''}>Próxima</button></div></div>`:''}
+  ${f.view==='funil' ? renderOppFunnel(list) : f.view==='cards' ? renderOppCards(visible) : renderOppTable(visible)}
+  ${list.length&&f.view!=='funil'?`<div class="row between wrap" style="margin-top:14px;"><span class="muted">Exibindo ${start+1}–${Math.min(start+pageSize,list.length)} de ${list.length}</span><div class="row gap-8"><button class="btn btn-sm" data-page="${f.page-1}" ${f.page<=1?'disabled':''}>Anterior</button><span class="badge badge-gray">${f.page} / ${pages}</span><button class="btn btn-sm" data-page="${f.page+1}" ${f.page>=pages?'disabled':''}>Próxima</button></div></div>`:''}
   `;
 }
 function statusColor(status){
@@ -1557,6 +1594,22 @@ function renderOppCards(list){
       </div>`).join('')}
   </div>`;
 }
+function renderOppFunnel(list){
+  if(!list.length) return `<div class="card empty">${icon('target')}<h4>Nenhuma oportunidade encontrada</h4><p>Ajuste os filtros para preencher o funil.</p></div>`;
+  return `<div class="funnel-board" aria-label="Funil comercial">
+    ${COMMERCIAL_STAGES.map(stage=>{
+      const companies=list.filter(company=>(company.status||'Nova')===stage);
+      return `<section class="funnel-column"><div class="funnel-column-head"><span>${esc(stage)}</span><span class="badge badge-gray">${companies.length}</span></div>
+        ${companies.length?companies.map(company=>`<article class="funnel-card">
+          <div class="row between" style="align-items:flex-start;gap:8px;"><div class="row gap-8" style="min-width:0;"><input type="checkbox" class="selOpp" data-id="${company.id}" ${state.selectedOpps.includes(company.id)?'checked':''}><b style="font-size:12.5px;line-height:1.35;">${esc(company.nome)}</b></div><span style="font-size:12px;font-weight:800;color:${classificacao(company.score).color};">${company.score}</span></div>
+          <div class="muted" style="font-size:11.5px;margin:7px 0;">${esc(companyLocation(company))} · ${esc(company.servicoRecomendado)}</div>
+          <select class="input" data-funnel-status="${company.id}" style="font-size:11.5px;padding:6px 8px;margin-bottom:8px;">${COMMERCIAL_STAGES.map(option=>`<option value="${esc(option)}" ${option===stage?'selected':''}>${esc(option)}</option>`).join('')}</select>
+          <button class="btn btn-sm" style="width:100%;" data-diag="${company.id}">Ver diagnóstico</button>
+        </article>`).join(''):`<div class="muted" style="font-size:11.5px;padding:12px 2px;">Nenhuma oportunidade</div>`}
+      </section>`;
+    }).join('')}
+  </div>`;
+}
 
 /* ================= DIAGNOSTICO LIST (fallback route) ================= */
 function renderDiagnosticoList(){
@@ -1595,11 +1648,12 @@ function renderDiagnostico(){
   const msgs = msgTemplates(c);
   const tone = state.diagTone;
   const currentOffer=c.offerRecommendation&&c.offerRecommendation.offer;
+  const alternativeOffers=(c.offerMatches||[]).filter(match=>!match.principal&&match.offer).slice(0,3);
   const currentStageIndex=currentOffer?OFFER_STAGES.findIndex(stage=>stage.key===currentOffer.etapa):-1;
   const nextOffer=currentStageIndex>=0?state.offers.filter(offer=>offer.ativo&&OFFER_STAGES.findIndex(stage=>stage.key===offer.etapa)>currentStageIndex).sort((a,b)=>OFFER_STAGES.findIndex(stage=>stage.key===a.etapa)-OFFER_STAGES.findIndex(stage=>stage.key===b.etapa)||a.posicao-b.posicao)[0]:null;
 
   return `
-  <button class="btn btn-sm btn-ghost" style="margin-bottom:14px;padding-left:0;" data-nav="${esc(state.diagReturnRoute||'#/oportunidades')}">${icon('arrow')} Voltar</button>
+  <button class="btn btn-sm btn-ghost" style="margin-bottom:14px;padding-left:0;" data-nav="${esc(state.diagReturnRoute||'#/oportunidades')}">${icon('arrowLeft')} Voltar</button>
   <div class="card" style="margin-bottom:18px;">
     <div class="diag-header">
       <div style="min-width:240px;">
@@ -1665,6 +1719,7 @@ function renderDiagnostico(){
             <div class="muted" style="font-size:12.5px;margin-bottom:6px;">Prioridade comercial: <b style="color:var(--text)">${c.potencial==='alto'?'Alta':c.potencial==='medio'?'Média':'Baixa'}</b></div>
             <div style="font-size:13px;">${esc(c.offerRecommendation.motivo)}</div>`:`<div style="font-weight:700;font-size:13.5px;margin-bottom:5px;">Nenhuma oferta compatível definida</div><div class="muted" style="font-size:12.5px;">Os dados públicos não devem ser transformados em uma recomendação sem aderência ao produto e ao público-alvo cadastrados.</div>`}
           </div>
+          ${alternativeOffers.length?`<div class="muted" style="font-size:11.5px;margin:12px 0 5px;">Outras ofertas avaliadas</div>${alternativeOffers.map(match=>`<div class="row between" style="padding:8px 0;border-top:1px solid var(--border);gap:10px;"><span style="font-size:12.5px;">${esc(match.offer.nome)}</span><b style="font-size:12px;color:var(--blue-light);">${match.compatibilidade}%</b></div>`).join('')}`:''}
         </div>
       </div>
     </div>
@@ -1694,8 +1749,14 @@ function renderDiagnostico(){
   <div class="card" style="margin-top:18px;">
     <div class="card-title">Alterar status comercial</div>
     <div class="pill-group">
-      ${['Nova','Em análise','Priorizada','Abordagem preparada','Contatada','Respondeu','Reunião agendada','Cliente','Descartada'].map(s=>`<span class="pill ${c.status===s?'active':''}" data-setstatus="${s}">${s}</span>`).join('')}
+      ${COMMERCIAL_STAGES.map(s=>`<span class="pill ${c.status===s?'active':''}" data-setstatus="${s}">${s}</span>`).join('')}
     </div>
+  </div>
+
+  <div class="card" style="margin-top:18px;">
+    <div class="card-title">Histórico comercial</div>
+    <p class="card-sub">Movimentações registradas automaticamente para manter a evolução da oportunidade auditável.</p>
+    ${(c.statusHistory||[]).length?`<div class="timeline">${c.statusHistory.slice(0,12).map(item=>`<div class="timeline-item"><div style="font-size:13px;font-weight:600;">${item.from?`${esc(item.from)} → `:''}${esc(item.to)}</div><div class="muted" style="font-size:11.5px;margin-top:2px;">${fmtDateTime(item.at)}</div></div>`).join('')}</div>`:`<div class="muted" style="font-size:12.5px;">O histórico começará a ser registrado a partir da primeira movimentação.</div>`}
   </div>
   `;
 }
@@ -1730,7 +1791,7 @@ function renderDetailTab(c, tab){
     <div class="verification-note">${completed
       ? `Auditoria técnica concluída em ${esc(fmtDate(new Date(audit.finished_at||audit.created_at)))}. Os resultados abaixo vieram de uma visita real à página inicial em navegador mobile.`
       : processing
-        ? 'A auditoria técnica está sendo processada pelo Apify. Aguarde a conclusão para ver os resultados.'
+        ? 'A auditoria técnica está sendo processada. Aguarde a conclusão para ver os resultados.'
         : 'Apenas o protocolo HTTPS pode ser identificado pelo endereço coletado. Execute a auditoria para verificar os demais itens em um navegador real.'}</div>
     ${completed?kv('Score técnico do site',`<span class="badge badge-blue">${esc(audit.score)} / 100</span>`):''}
     ${kv('HTTPS', verificationBadge(c.siteInfo.https))}
@@ -1837,10 +1898,7 @@ function bindDiagnostico(){
     el.addEventListener('click', async ()=>{
       const c = state.companies.find(x=>x.id===currentDiagId);
       const novoStatus = el.getAttribute('data-setstatus');
-      c.status = novoStatus;
-      render();
-      toast('Status atualizado para "'+novoStatus+'".');
-      try{ await persistCompanyField(c.id, {status: novoStatus}); }
+      try{ await updateCompanyStatus(c,novoStatus); render(); toast('Status atualizado para "'+novoStatus+'".'); }
       catch(e){ toast('Não foi possível salvar o status agora.'); }
     });
   });
@@ -1876,7 +1934,11 @@ function bindDiagnostico(){
     try{ await persistCompanyField(c.id, {monitorada:true}); }catch(e){}
   });
   const prep = document.getElementById('prepBtn');
-  if(prep) prep.addEventListener('click', ()=>{ flashButton(prep, 'Preparada'); toast('Abordagem preparada e pronta para envio.'); });
+  if(prep) prep.addEventListener('click', async ()=>{
+    const c=state.companies.find(x=>x.id===currentDiagId);
+    try{ await updateCompanyStatus(c,'Abordagem preparada'); flashButton(prep,'Preparada'); toast('Abordagem preparada e registrada no funil.'); }
+    catch(e){ toast('Não foi possível atualizar a etapa comercial.'); }
+  });
 }
 
 /* ================= MONITORADAS ================= */
@@ -2066,8 +2128,10 @@ function renderOfferCatalog(){
 
 function renderConfiguracoes(){
   const ob = state.onboarding;
-  const tab = state.configTab || 'perfil';
-  const tabs = [['perfil','Perfil'],['aparencia','Aparência'],['empresa','Empresa'],['oferta','Oferta comercial'],['cliente','Cliente ideal'],['score','Critérios do score'],['usuarios','Usuários'],['integracoes','Integrações'],['plano','Plano e uso'],['privacidade','Privacidade e bloqueios']];
+  const isPlatformAdmin=!!state.user.isPlatformAdmin;
+  const requestedTab=state.configTab||'perfil';
+  const tab=requestedTab==='integracoes'&&!isPlatformAdmin?'perfil':requestedTab;
+  const tabs=[['perfil','Perfil'],['aparencia','Aparência'],['empresa','Empresa'],['oferta','Oferta comercial'],['cliente','Cliente ideal'],['score','Critérios do score'],['usuarios','Usuários'],...(isPlatformAdmin?[['integracoes','Integrações']]:[]),['plano','Plano e uso'],['privacidade','Privacidade e bloqueios']];
   let inner = '';
   if(tab==='perfil'){
     inner = `
@@ -2116,16 +2180,17 @@ function renderConfiguracoes(){
     inner = `
       <div class="table-scroll"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th></th></tr></thead>
       <tbody>
-      <tr><td>${state.user.nome}</td><td class="muted">felipe@quantisgrowth.com.br</td><td><span class="badge badge-blue">Administrador</span></td><td></td></tr>
+      <tr><td>${esc(state.user.nome||'Usuário')}</td><td class="muted">${esc(state.user.email||'—')}</td><td><span class="badge badge-blue">${state.user.isPlatformAdmin?'Administrador da plataforma':'Administrador da conta'}</span></td><td></td></tr>
       <tr><td class="muted">Convidar novo usuário</td><td class="muted">—</td><td class="muted">—</td><td><button class="btn btn-sm">Convidar</button></td></tr>
       </tbody></table></div>`;
-  } else if(tab==='integracoes'){
+  } else if(tab==='integracoes'&&isPlatformAdmin){
     inner = `
-      ${[['Apify / Google Maps','Fonte principal do radar de estabelecimentos',true],['Google Places API oficial','Integração opcional para uma etapa futura',false],['Instagram / Meta','Preparado para integração futura',false],['Supabase','Banco de dados para autenticação e persistência multiempresa',true],['CRM externo','Exportação de oportunidades priorizadas',false]].map(([n,d,connected])=>`
+      <div class="badge badge-blue" style="display:inline-flex;margin-bottom:12px;">Acesso exclusivo do administrador da plataforma</div>
+      ${state.integrations.map(item=>`
       <div class="row between" style="padding:12px 0;border-top:1px solid var(--border);">
-        <div><div style="font-weight:600;font-size:13.5px;">${n}</div><div class="muted" style="font-size:12px;">${d}</div></div>
-        <span class="badge ${connected?'badge-blue':'badge-gray'}">${connected?'Conectado':'Não conectado'}</span>
-      </div>`).join('')}`;
+        <div><div style="font-weight:600;font-size:13.5px;">${esc(item.name)}</div><div class="muted" style="font-size:12px;">${esc(item.description)}</div></div>
+        <span class="badge ${item.connected?'badge-blue':'badge-gray'}">${item.connected?'Conectado':'Não conectado'}</span>
+      </div>`).join('')||'<div class="muted">Nenhuma integração cadastrada.</div>'}`;
   } else if(tab==='plano'){
     inner = `
       <div class="badge badge-blue" style="display:block;padding:14px;margin-bottom:14px;">Plano atual: <b>${state.user.plano}</b> · até 20 oportunidades analisadas por radar</div>
@@ -2142,7 +2207,7 @@ function renderConfiguracoes(){
   }
   return `
   <h1 class="page-title">Configurações</h1>
-  <p class="page-sub">Gerencie seu perfil, oferta comercial, critérios de score e integrações.</p>
+  <p class="page-sub">Gerencie seu perfil, ofertas, critérios de score e preferências da conta.</p>
   <div class="grid" style="grid-template-columns:220px 1fr;align-items:start;">
     <div class="card" style="padding:10px;">
       ${tabs.map(([k,l])=>`<div class="nav-item" style="padding:9px 14px;border-radius:8px;" data-configtab="${k}" data-active="${tab===k}">${l}</div>`).join('')}
@@ -2180,9 +2245,10 @@ function bindOportunidades(){
     state.oppFilters=Object.assign({},JSON.parse(JSON.stringify(DEFAULT_OPP_FILTERS)),layout);
     state.selectedOpps=[];
   };
-  const vt = document.getElementById('viewTabela'), vc = document.getElementById('viewCards');
+  const vt = document.getElementById('viewTabela'), vc = document.getElementById('viewCards'), vf=document.getElementById('viewFunnel');
   if(vt) vt.addEventListener('click', ()=>{ state.oppFilters.view='tabela'; setState({}); });
   if(vc) vc.addEventListener('click', ()=>{ state.oppFilters.view='cards'; setState({}); });
+  if(vf) vf.addEventListener('click', ()=>{ state.oppFilters.view='funil'; state.oppFilters.page=1; setState({}); });
   const filterBindings={
     fCreatedFrom:'createdFrom',fCreatedTo:'createdTo',fAnalyzedFrom:'analyzedFrom',fAnalyzedTo:'analyzedTo',
     fScoreMin:'scoreMin',fScoreMax:'scoreMax',fPotencial:'potencial',fStatus:'status',fOffer:'offerId',
@@ -2192,6 +2258,12 @@ function bindOportunidades(){
     state.oppFilters.folderId=button.getAttribute('data-folder-view')||'todos';
     state.oppFilters.archive=button.getAttribute('data-archive-view')||'ativas';
     state.oppFilters.page=1; state.selectedOpps=[]; setState({});
+  }));
+  document.querySelectorAll('[data-funnel-status]').forEach(select=>select.addEventListener('change',async()=>{
+    const company=state.companies.find(item=>item.id===select.getAttribute('data-funnel-status'));
+    const previous=company&&company.status;
+    try{ await updateCompanyStatus(company,select.value); render(); toast(`Oportunidade movida de "${previous}" para "${select.value}".`); }
+    catch(error){ select.value=previous||'Nova'; toast('Não foi possível mover a oportunidade agora.'); }
   }));
   const newFolder=document.getElementById('newOppFolder');
   if(newFolder) newFolder.addEventListener('click',async()=>{
@@ -2285,7 +2357,7 @@ function bindOportunidades(){
     const ids = state.selectedOpps.slice();
     const {error}=await sb.from('empresas').update({status:'Priorizada'}).eq('user_id',state.userId).in('id', ids);
     if(error){ toast('Não foi possível atualizar o status.'); return; }
-    ids.forEach(id=>{ const c=state.companies.find(x=>x.id===id); if(c) c.status='Priorizada'; });
+    ids.forEach(id=>{ const c=state.companies.find(x=>x.id===id); if(c&&c.status!=='Priorizada'){ const previous=c.status; c.status='Priorizada'; c.statusHistory=c.statusHistory||[]; c.statusHistory.unshift({from:previous,to:'Priorizada',at:new Date().toISOString(),by:state.userId}); } });
     toast('Status atualizado em massa.'); state.selectedOpps=[]; render();
   });
   const addFolder=document.getElementById('bulkAddFolder');
@@ -2332,10 +2404,13 @@ function bindResultados(){
     sel.addEventListener('change', async ()=>{
       const c = state.companies.find(x=>x.id===sel.getAttribute('data-result'));
       const map = {'Sem contato':'Nova','Sem resposta':'Contatada','Respondeu':'Respondeu','Sem interesse':'Descartada','Reunião':'Reunião agendada','Proposta':'Reunião agendada','Venda':'Cliente'};
-      c.status = map[sel.value] || c.status;
-      c.resultado = sel.value==='Venda' ? 'venda' : null;
-      toast('Resultado registrado para '+c.nome+'.');
-      try{ await persistCompanyField(c.id, {status:c.status, resultado:c.resultado}); }catch(e){ toast('Não foi possível salvar agora.'); }
+      const nextStatus=map[sel.value]||c.status;
+      const result=sel.value==='Venda'?'venda':null;
+      try{
+        if(nextStatus!==c.status) await updateCompanyStatus(c,nextStatus);
+        await persistCompanyField(c.id,{resultado:result});
+        c.resultado=result; toast('Resultado registrado para '+c.nome+'.');
+      }catch(e){ toast('Não foi possível salvar agora.'); }
     });
   });
 }

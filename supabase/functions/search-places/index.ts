@@ -108,7 +108,8 @@ async function apifyRequest(path: string, token: string, init?: RequestInit) {
     } catch {
       // Mantém a mensagem segura sem expor a resposta completa do provedor.
     }
-    throw new Error([`Apify respondeu com status ${response.status}.`, detail].filter(Boolean).join(" "));
+    console.error(JSON.stringify({ event: "place_provider_http_error", status: response.status, detail }));
+    throw new Error(`A fonte pública respondeu com status ${response.status}.`);
   }
   return response.json();
 }
@@ -200,11 +201,11 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
 
     await ctx.supabase.from("score_components").delete().eq("empresa_id", company.id).in("versao_modelo", ["apify-google-v1", "offer-fit-v2"]);
     const { error: scoreError } = await ctx.supabase.from("score_components").insert([
-      ["Perfil Google", score.profile, 20, "Completude e situação pública do estabelecimento no Google Maps."],
+      ["Perfil comercial público", score.profile, 20, "Completude e situação pública do estabelecimento na fonte consultada."],
       ["Compatibilidade com a oferta", score.compatibility, 30, recommendation ? recommendation.reason : "Nenhuma oferta foi vinculada ao radar; compatibilidade ainda não avaliada."],
-      ["Reputação", score.reputation, 15, "Nota e volume de avaliações públicas no Google Maps."],
+      ["Reputação", score.reputation, 15, "Nota e volume de avaliações na fonte pública consultada."],
       ["Contato", score.contact, 15, "Canais públicos de contato encontrados."],
-      ["Confiança", score.confidence, 20, "Quantidade de campos verificáveis coletados via Apify."],
+      ["Confiança", score.confidence, 20, "Quantidade de campos públicos verificáveis coletados."],
     ].map(([dimensao, pontos, maximo, explicacao]) => ({
       user_id: run.user_id, empresa_id: company.id, radar_run_id: run.id,
       versao_modelo: "offer-fit-v2", dimensao, pontos, maximo, explicacao,
@@ -230,9 +231,9 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
     }
 
     const evidence = [];
-    if (!place.website) evidence.push({ texto: "Site não encontrado no perfil público do Google Maps.", fonte: "Google Maps via Apify", confianca: "Alta" });
-    if (!place.phone) evidence.push({ texto: "Telefone não informado no perfil público do Google Maps.", fonte: "Google Maps via Apify", confianca: "Alta" });
-    if (score.rating) evidence.push({ texto: `Nota pública ${score.rating.toFixed(1)} de 5 com ${score.reviews} avaliações.`, fonte: "Google Maps via Apify", confianca: "Alta" });
+    if (!place.website) evidence.push({ texto: "Site não encontrado no perfil comercial público.", fonte: "Perfil comercial público", confianca: "Alta" });
+    if (!place.phone) evidence.push({ texto: "Telefone não informado no perfil comercial público.", fonte: "Perfil comercial público", confianca: "Alta" });
+    if (score.rating) evidence.push({ texto: `Nota pública ${score.rating.toFixed(1)} de 5 com ${score.reviews} avaliações.`, fonte: "Perfil comercial público", confianca: "Alta" });
     await ctx.supabase.from("evidencias").delete().eq("empresa_id", company.id).eq("tipo_fonte", PROVIDER);
     if (evidence.length) {
       const { error: evidenceError } = await ctx.supabase.from("evidencias").insert(evidence.map((item) => ({
@@ -250,7 +251,7 @@ export default {
   fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
     if (req.method !== "POST") return Response.json({ error: "Método não permitido" }, { status: 405 });
     const token = Deno.env.get("APIFY_API_TOKEN");
-    if (!token) return Response.json({ error: "Integração do Apify ainda não foi configurada no Supabase." }, { status: 503 });
+    if (!token) return Response.json({ error: "A fonte de dados do radar ainda não foi configurada." }, { status: 503 });
 
     let runId: string | null = null;
     let radarId: string | null = null;
@@ -294,7 +295,7 @@ export default {
           }),
         });
         const providerRun = apifyPayload?.data;
-        if (!providerRun?.id) throw new Error("O Apify não retornou a identificação da coleta.");
+        if (!providerRun?.id) throw new Error("O provedor não retornou a identificação da coleta.");
 
         await ctx.supabase.from("radar_runs").update({
           provider_run_id: providerRun.id, provider_dataset_id: providerRun.defaultDatasetId ?? null,
@@ -313,7 +314,7 @@ export default {
       radarId = run.radar_id;
       if (run.status === "concluido") return Response.json({ status: "concluido", radar_id: radarId, run_id: runId, found: run.encontrados });
       if (run.status === "falhou") return Response.json({ status: "falhou", error: run.erro || "A coleta não foi concluída." }, { status: 500 });
-      if (!run.provider_run_id) throw new Error("A execução não possui uma coleta vinculada no Apify.");
+      if (!run.provider_run_id) throw new Error("A execução não possui uma coleta vinculada.");
 
       const providerPayload = await apifyRequest(`actor-runs/${run.provider_run_id}`, token);
       const providerRun = providerPayload?.data;
@@ -323,17 +324,17 @@ export default {
       }).eq("id", runId);
 
       if (["FAILED", "TIMED-OUT", "ABORTED"].includes(providerStatus)) {
-        const message = `A coleta do Apify terminou com status ${providerStatus}.`;
+        const message = `A coleta terminou com status ${providerStatus}.`;
         await markFailed(ctx, runId, radarId, message);
         return Response.json({ status: "falhou", error: message }, { status: 500 });
       }
       if (providerStatus !== "SUCCEEDED") return Response.json({ status: "processando", provider_status: providerStatus, run_id: runId }, { status: 202 });
 
       const datasetId = providerRun?.defaultDatasetId || run.provider_dataset_id;
-      if (!datasetId) throw new Error("O Apify concluiu a coleta sem disponibilizar o conjunto de resultados.");
+      if (!datasetId) throw new Error("A coleta foi concluída sem disponibilizar o conjunto de resultados.");
       await ctx.supabase.from("radar_runs").update({ provider_status: "SAVING" }).eq("id", runId);
       const places = await apifyRequest(`datasets/${datasetId}/items?clean=true&format=json`, token);
-      if (!Array.isArray(places)) throw new Error("O Apify retornou um formato de resultados inesperado.");
+      if (!Array.isArray(places)) throw new Error("A fonte pública retornou um formato de resultados inesperado.");
       const saved = await savePlaces(ctx, run, places);
 
       const finishedAt = new Date().toISOString();
@@ -341,7 +342,7 @@ export default {
         status: "concluido", provider_status: "SUCCEEDED", encontrados: saved.length, concluido_em: finishedAt,
       }).eq("id", runId);
       await ctx.supabase.from("radares").update({ status: "concluido", concluido_em: finishedAt, erro: null }).eq("id", radarId);
-      return Response.json({ status: "concluido", provider: PROVIDER, radar_id: radarId, run_id: runId, found: saved.length, companies: saved });
+      return Response.json({ status: "concluido", radar_id: radarId, run_id: runId, found: saved.length, companies: saved });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha inesperada ao executar o radar.";
       console.error(JSON.stringify({ event: "apify_google_maps_error", run_id: runId, radar_id: radarId, message }));
