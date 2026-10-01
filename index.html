@@ -631,7 +631,7 @@ function msgTemplates(c){
 // localmente, por conveniência, e nunca substituem o que está no banco.
 const DEFAULT_OPP_FILTERS = {
   search:'', createdFrom:'', createdTo:'', analyzedFrom:'', analyzedTo:'',
-  scoreMin:'', scoreMax:'', potencial:'todos', offerId:'todos', offerType:'todos',
+  scoreMin:'', scoreMax:'', potencial:'todos', offerId:'todos', offerType:'todos', validation:'todos',
   status:'todos', segmento:'todos', cidade:'todos', folderId:'todos', archive:'ativas', sort:'score_desc', page:1, pageSize:20, view:'tabela',
 };
 const DEFAULT_UI_PREFS = {
@@ -1584,6 +1584,55 @@ function activateCompanyList(){
   if(state.activeCompanyList!==scope){
     state.activeCompanyList=scope;state.selectedOpps=[];state.oppFilterOpen=false;
   }
+  const available=new Set(companyListBase().map(company=>company.id));
+  state.selectedOpps=state.selectedOpps.filter(id=>available.has(id));
+}
+function diagnosisReview(company){
+  const evidenceCount=(company.evidencias||[]).filter(e=>e.texto&&e.url).length;
+  const audited=company.siteAudit?.status==='concluido';
+  const registryChecked=!!(company.cnpj&&company.cnpjValidatedAt);
+  const pending=[];
+  if(!evidenceCount)pending.push('Revisar evidências com fonte');
+  if(!company.site)pending.push('Localizar ou confirmar o site');
+  else if(!audited)pending.push(company.siteAudit?.status==='falhou'?'Repetir auditoria do site':'Auditar o site');
+  if(!registryChecked)pending.push('Validar CNPJ e identidade');
+  else if(company.cnpjActive===false)pending.push('Revisar situação cadastral: CNPJ não ativo');
+  const stage=!evidenceCount?'evidencias':!audited?'site':!registryChecked||company.cnpjActive===false?'cnpj':'registradas';
+  return {evidenceCount,audited,registryChecked,pending,stage};
+}
+function diagnosisStageLabel(stage){
+  return ({evidencias:'Revisar evidências',site:'Auditoria pendente',cnpj:'Revisão cadastral',registradas:'Verificações registradas'})[stage]||'Todos';
+}
+function diagnosisDate(value){
+  const date=value?new Date(value):null;
+  return date&&!Number.isNaN(date.getTime())?date.toLocaleDateString('pt-BR',{timeZone:'UTC'}):'Não registrada';
+}
+function diagnosisAuditLabel(company){
+  if(!company.site)return 'Site não localizado na coleta';
+  const status=company.siteAudit?.status;
+  return status==='concluido'?'Auditoria concluída':status==='falhou'?'Auditoria falhou':['pendente','processando'].includes(status)?'Auditoria em andamento':'Site não auditado';
+}
+function renderDiagnosisCard(company){
+  const review=diagnosisReview(company);
+  return `<article class="card"><div class="row between gap-8"><input type="checkbox" class="selOpp" data-id="${esc(company.id)}" aria-label="Selecionar ${esc(company.nome)}" ${state.selectedOpps.includes(company.id)?'checked':''}><span class="badge badge-gray">${esc(diagnosisStageLabel(review.stage))}</span></div>
+    <h3 style="font-size:15px;margin:14px 0 5px;">${esc(company.nome)}</h3><p class="muted">${esc(company.segmento)} · ${esc(companyLocation(company))}</p>
+    <div class="divider"></div><div class="row between wrap"><span>Score ${esc(company.score)}</span><span class="muted">Confiança: ${esc(company.confianca||'Não informada')}</span></div>
+    <p class="muted" style="margin-top:12px;">${review.evidenceCount} evidência(s) com fonte · Análise: ${diagnosisDate(company.analyzedAt)}</p>
+    <p style="margin:10px 0;">${esc(diagnosisAuditLabel(company))}</p><p class="muted">Última auditoria: ${diagnosisDate(company.siteAudit?.finished_at)}</p>
+    <p style="margin:12px 0;">${esc(review.pending.join(' · ')||'Coleta, auditoria e consulta cadastral registradas; revise o conteúdo antes de abordar.')}</p>
+    <button class="btn btn-sm btn-block" data-diag="${esc(company.id)}">Revisar diagnóstico</button></article>`;
+}
+function renderDiagnosisList(list,view){
+  if(!list.length)return renderOpportunityEmpty();
+  if(view==='cards')return `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));">${list.map(renderDiagnosisCard).join('')}</div>`;
+  if(view==='funil')return `<div class="funnel-board" aria-label="Quadro de validação">${['evidencias','site','cnpj','registradas'].map(stage=>{
+    const companies=list.filter(c=>diagnosisReview(c).stage===stage);
+    return `<section class="funnel-column"><div class="funnel-column-head"><span>${diagnosisStageLabel(stage)}</span><span class="badge badge-gray">${companies.length}</span></div>${companies.map(renderDiagnosisCard).join('')||'<p class="muted">Nenhuma análise nesta etapa</p>'}</section>`;
+  }).join('')}</div>`;
+  return `<div class="card" style="padding:0;"><div class="table-scroll"><table><thead><tr><th><input type="checkbox" id="selAll" aria-label="Selecionar esta página"></th><th>Empresa</th><th>Score / confiança</th><th>Evidências com fonte</th><th>Última análise</th><th>Auditoria do site</th><th>O que falta validar</th><th></th></tr></thead><tbody>${list.map(c=>{
+    const review=diagnosisReview(c);
+    return `<tr><td><input type="checkbox" class="selOpp" data-id="${esc(c.id)}" aria-label="Selecionar ${esc(c.nome)}" ${state.selectedOpps.includes(c.id)?'checked':''}></td><td><b>${esc(c.nome)}</b><div class="muted">${esc(c.segmento)} · ${esc(companyLocation(c))}</div></td><td><b>${esc(c.score)}</b><div class="muted">${esc(c.confianca||'Não informada')}</div></td><td>${review.evidenceCount}</td><td>${diagnosisDate(c.analyzedAt)}</td><td>${esc(diagnosisAuditLabel(c))}<div class="muted">${diagnosisDate(c.siteAudit?.finished_at)}</div></td><td style="min-width:180px;max-width:260px;">${esc(review.pending.join(' · ')||'Verificações registradas; revisar conteúdo')}</td><td><button class="btn btn-sm" data-diag="${esc(c.id)}">Revisar diagnóstico</button></td></tr>`;
+  }).join('')}</tbody></table></div></div>`;
 }
 function dateKey(value){ return value ? String(value).slice(0,10) : ''; }
 function opportunityExportRows(mode){
@@ -1606,6 +1655,13 @@ function buildCompanyCsv(companies){
     c.sinais?.[0]?.texto,(c.folderIds||[]).map(id=>state.folders.find(folder=>folder.id===id)?.nome).filter(Boolean).join(' | '),
     dateKey(c.createdAt),dateKey(c.analyzedAt),c.archivedAt?'Sim':'Não'
   ]);
+  if(companyListScope()==='diagnostico'){
+    headers.push('Evidências com fonte','Auditoria do site','Data da auditoria','Consulta CNPJ registrada','Etapa de validação','Pendências de validação');
+    rows.forEach((row,index)=>{
+      const company=companies[index],review=diagnosisReview(company);
+      row.push(review.evidenceCount,diagnosisAuditLabel(company),dateKey(company.siteAudit?.finished_at),review.registryChecked?'Sim':'Não',diagnosisStageLabel(review.stage),review.pending.join(' | '));
+    });
+  }
   return '\ufeff'+[headers,...rows].map(row=>row.map(csvCell).join(';')).join('\r\n')+'\r\n';
 }
 function downloadCompanyCsv(mode){
@@ -1677,6 +1733,7 @@ function opportunityDataset(){
   if(f.createdTo) list=list.filter(c=>dateKey(c.createdAt)<=f.createdTo);
   if(f.analyzedFrom) list=list.filter(c=>dateKey(c.analyzedAt)>=f.analyzedFrom);
   if(f.analyzedTo) list=list.filter(c=>dateKey(c.analyzedAt)<=f.analyzedTo);
+  if(companyListScope()==='diagnostico'&&f.validation&&f.validation!=='todos')list=list.filter(c=>diagnosisReview(c).stage===f.validation);
   const sorters={
     score_desc:(a,b)=>Number(b.score)-Number(a.score), score_asc:(a,b)=>Number(a.score)-Number(b.score),
     created_desc:(a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')),
@@ -1690,6 +1747,7 @@ function opportunityFilterChips(f){
   const offer=state.offers.find(item=>item.id===f.offerId);
   const typeLabel=OFFER_TYPES[f.offerType];
   const values=[
+    ['validation',companyListScope()==='diagnostico'&&f.validation&&f.validation!=='todos'&&('Validação: '+diagnosisStageLabel(f.validation))],
     ['search',f.search&&`Busca: ${f.search}`], ['createdFrom',f.createdFrom&&`Criada desde ${f.createdFrom.split('-').reverse().join('/')}`],
     ['createdTo',f.createdTo&&`Criada até ${f.createdTo.split('-').reverse().join('/')}`], ['analyzedFrom',f.analyzedFrom&&`Analisada desde ${f.analyzedFrom.split('-').reverse().join('/')}`],
     ['analyzedTo',f.analyzedTo&&`Analisada até ${f.analyzedTo.split('-').reverse().join('/')}`], ['scoreMin',f.scoreMin!==''&&`Score mínimo ${f.scoreMin}`],
@@ -1728,12 +1786,12 @@ function renderOportunidades(){
     <div class="row gap-8">
       <button class="btn btn-sm ${f.view==='tabela'?'btn-primary':''}" id="viewTabela">Tabela</button>
       <button class="btn btn-sm ${f.view==='cards'?'btn-primary':''}" id="viewCards">Cards</button>
-      <button class="btn btn-sm ${f.view==='funil'?'btn-primary':''}" id="viewFunnel">Funil</button>
+      <button class="btn btn-sm ${f.view==='funil'?'btn-primary':''}" id="viewFunnel">${scope==='diagnostico'?'Validação':'Funil'}</button>
       <details class="export-picker" id="csvExportPicker"><summary class="btn btn-sm">${icon('dl')} Exportar CSV ▾</summary><div class="export-menu"><button data-export-csv="selected" ${opportunityExportRows('selected').length?'':'disabled'}>Exportar selecionadas (${opportunityExportRows('selected').length})<small>Somente as empresas marcadas, inclusive em outras páginas ou filtros.</small></button><button data-export-csv="filtered" ${list.length?'':'disabled'}>Exportar resultados filtrados (${list.length})<small>Todos os resultados desta visualização, em todas as páginas.</small></button></div></details>
     </div>
   </div>
 
-  ${scope==='monitoradas'?'<p class="page-sub">O monitoramento automático não está ativado. Esta lista organiza as empresas acompanhadas; a reanálise é manual.</p>':scope==='diagnostico'?'<p class="page-sub">Consulte as análises disponíveis e abra uma empresa para ver as evidências.</p>':''}
+  ${scope==='monitoradas'?'<p class="page-sub">O monitoramento automático não está ativado. Esta lista organiza as empresas acompanhadas; a reanálise é manual.</p>':scope==='diagnostico'?'<p class="page-sub">Revise evidências, auditorias e pendências antes da abordagem. Verificações registradas não garantem que a empresa esteja totalmente validada.</p>':'<p class="page-sub">Priorize quem abordar, organize sua carteira e acompanhe cada etapa comercial.</p>'}
   <div class="folder-strip" aria-label="Visualizações de empresas">
     <button class="folder-view ${f.folderId==='todos'&&f.archive==='ativas'?'active':''}" data-folder-view="todos" data-archive-view="ativas">Todas <span class="folder-count">${activeTotal}</span></button>
     <button class="folder-view ${f.folderId==='sem_pasta'&&f.archive==='ativas'?'active':''}" data-folder-view="sem_pasta" data-archive-view="ativas">Sem pasta <span class="folder-count">${withoutFolderTotal}</span></button>
@@ -1749,13 +1807,14 @@ function renderOportunidades(){
     <button class="btn btn-sm" id="openOppFilters">${icon('filter')} Filtros${chips.filter(item=>item[0]!=='search').length?` <span class="badge badge-blue">${chips.filter(item=>item[0]!=='search').length}</span>`:''}</button>
   </div>
   ${chips.filter(item=>item[0]!=='search').length?`<div class="filter-chips">${chips.filter(item=>item[0]!=='search').map(([key,label])=>`<button class="filter-chip" data-clear-filter="${key}">${esc(label)} <span aria-hidden="true">×</span></button>`).join('')}<button class="text-action" id="clearOppFilters">Limpar tudo</button></div>`:''}
-  ${state.selectedOpps.length ? `<div class="bulk-bar"><span class="badge badge-blue">${state.selectedOpps.length} selecionada${state.selectedOpps.length===1?'':'s'}</span><select class="input bulk-select" id="bulkFolder"><option value="">Adicionar a uma pasta…</option>${state.folders.map(folder=>`<option value="${folder.id}">${esc(folder.nome)}</option>`).join('')}</select><button class="btn btn-sm" id="bulkAddFolder" ${state.folders.length?'':'disabled'}>Adicionar</button>${currentFolder?`<button class="btn btn-sm" id="bulkRemoveFolder">Remover desta pasta</button>`:''}<span style="flex:1"></span><button class="btn btn-sm" id="bulkReanalyze">Reanalisar</button><button class="btn btn-sm" id="bulkMonitor">Monitorar</button><button class="btn btn-sm" id="bulkStatus">Priorizar</button><button class="btn btn-sm" id="bulkArchive">${f.archive==='arquivadas'?'Desarquivar':'Arquivar'}</button></div>` : ''}
+  ${state.selectedOpps.length ? `<div class="bulk-bar"><span class="badge badge-blue">${state.selectedOpps.length} selecionada${state.selectedOpps.length===1?'':'s'}</span><select class="input bulk-select" id="bulkFolder"><option value="">Adicionar a uma pasta…</option>${state.folders.map(folder=>`<option value="${folder.id}">${esc(folder.nome)}</option>`).join('')}</select><button class="btn btn-sm" id="bulkAddFolder" ${state.folders.length?'':'disabled'}>Adicionar</button>${currentFolder?`<button class="btn btn-sm" id="bulkRemoveFolder">Remover desta pasta</button>`:''}<span style="flex:1"></span><button class="btn btn-sm" id="bulkReanalyze">Reanalisar</button>${scope!=='diagnostico'?`<button class="btn btn-sm" id="bulkMonitor">Monitorar</button><button class="btn btn-sm" id="bulkStatus">Priorizar</button><button class="btn btn-sm" id="bulkArchive">${f.archive==='arquivadas'?'Desarquivar':'Arquivar'}</button>`:''}</div>` : ''}
 
   ${state.oppFilterOpen?`
     <div class="filter-scrim" id="closeOppFilters"></div>
-    <aside class="filter-drawer" role="dialog" aria-modal="true" aria-label="Filtros de oportunidades">
-      <div class="filter-drawer-head"><div><div class="card-title" style="font-size:18px;">Filtros</div><div class="muted" style="font-size:12.5px;">Refine sua lista de oportunidades</div></div><button class="icon-btn" id="closeOppFiltersButton" aria-label="Fechar">×</button></div>
+    <aside class="filter-drawer" role="dialog" aria-modal="true" aria-label="Filtros de ${title}">
+      <div class="filter-drawer-head"><div><div class="card-title" style="font-size:18px;">Filtros</div><div class="muted" style="font-size:12.5px;">Refine sua lista de ${title.toLowerCase()}</div></div><button class="icon-btn" id="closeOppFiltersButton" aria-label="Fechar">×</button></div>
       <div class="filter-drawer-body">
+        ${scope==='diagnostico'?`<div class="filter-section"><div class="filter-section-title">Pendências de validação</div><label class="label" for="fValidation">Etapa da revisão</label><select class="input" id="fValidation"><option value="todos">Todas</option>${['evidencias','site','cnpj','registradas'].map(stage=>`<option value="${stage}" ${f.validation===stage?'selected':''}>${diagnosisStageLabel(stage)}</option>`).join('')}</select><p class="muted" style="margin-top:8px;">A etapa indica a primeira pendência encontrada, não um certificado de validação.</p></div>`:''}
         <div class="filter-section"><div class="filter-section-title">Data de criação</div><div class="filter-grid-2"><div><label class="label">De</label><input class="input" type="date" id="fCreatedFrom" value="${esc(f.createdFrom)}"></div><div><label class="label">Até</label><input class="input" type="date" id="fCreatedTo" value="${esc(f.createdTo)}"></div></div></div>
         <div class="filter-section"><div class="filter-section-title">Data da análise</div><div class="filter-grid-2"><div><label class="label">De</label><input class="input" type="date" id="fAnalyzedFrom" value="${esc(f.analyzedFrom)}"></div><div><label class="label">Até</label><input class="input" type="date" id="fAnalyzedTo" value="${esc(f.analyzedTo)}"></div></div></div>
         <div class="filter-section"><div class="filter-section-title">Qualificação</div><div class="filter-grid-2"><div><label class="label">Score mínimo</label><input class="input" type="number" min="0" max="100" id="fScoreMin" value="${esc(f.scoreMin)}" placeholder="0"></div><div><label class="label">Score máximo</label><input class="input" type="number" min="0" max="100" id="fScoreMax" value="${esc(f.scoreMax)}" placeholder="100"></div><div><label class="label">Potencial</label><select class="input" id="fPotencial"><option value="todos" ${f.potencial==='todos'?'selected':''}>Todos</option><option value="alto" ${f.potencial==='alto'?'selected':''}>Alto</option><option value="medio" ${f.potencial==='medio'?'selected':''}>Médio</option><option value="baixo" ${f.potencial==='baixo'?'selected':''}>Baixo</option></select></div><div><label class="label">Status</label><select class="input" id="fStatus"><option value="todos" ${f.status==='todos'?'selected':''}>Todos</option>${statusOptions.map(s=>`<option value="${esc(s)}" ${f.status===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div></div></div>
@@ -1766,7 +1825,7 @@ function renderOportunidades(){
       <div class="filter-drawer-footer"><button class="btn" id="clearOppFiltersDrawer">Limpar filtros</button><button class="btn btn-primary" style="flex:1" id="applyOppFilters">Aplicar filtros</button></div>
     </aside>`:''}
 
-  ${f.view==='funil' ? renderOppFunnel(list) : f.view==='cards' ? renderOppCards(visible) : renderOppTable(visible)}
+  ${scope==='diagnostico'?renderDiagnosisList(f.view==='funil'?list:visible,f.view):f.view==='funil' ? renderOppFunnel(list) : f.view==='cards' ? renderOppCards(visible) : renderOppTable(visible)}
   ${list.length&&f.view!=='funil'?`<div class="row between wrap" style="margin-top:14px;"><span class="muted">Exibindo ${start+1}–${Math.min(start+pageSize,list.length)} de ${list.length}</span><div class="row gap-8"><button class="btn btn-sm" data-page="${f.page-1}" ${f.page<=1?'disabled':''}>Anterior</button><span class="badge badge-gray">${f.page} / ${pages}</span><button class="btn btn-sm" data-page="${f.page+1}" ${f.page>=pages?'disabled':''}>Próxima</button></div></div>`:''}
   `;
 }
@@ -1785,7 +1844,7 @@ function renderOppTable(list){
       <thead><tr>
         <th><input type="checkbox" id="selAll"></th>
         <th>Empresa</th><th>Segmento</th><th>Localização</th><th>Score</th><th>Potencial</th>
-        <th>Principal sinal</th><th>Serviço recomendado</th><th>Confiança</th><th>Status</th><th>Análise</th><th></th>
+        <th>Motivo para priorizar</th><th>Oferta com possível encaixe</th><th>Confiança</th><th>Etapa comercial</th><th>Análise</th><th></th>
       </tr></thead>
       <tbody>
       ${list.map(c=>`
@@ -2590,7 +2649,7 @@ function bindOportunidades(){
   if(vf) vf.addEventListener('click', ()=>{ companyListFilters().view='funil'; companyListFilters().page=1; setState({}); });
   const filterBindings={
     fCreatedFrom:'createdFrom',fCreatedTo:'createdTo',fAnalyzedFrom:'analyzedFrom',fAnalyzedTo:'analyzedTo',
-    fScoreMin:'scoreMin',fScoreMax:'scoreMax',fPotencial:'potencial',fStatus:'status',fOffer:'offerId',
+    fValidation:'validation',fScoreMin:'scoreMin',fScoreMax:'scoreMax',fPotencial:'potencial',fStatus:'status',fOffer:'offerId',
     fOfferType:'offerType',fSegmento:'segmento',fCidade:'cidade',fFolder:'folderId',fArchive:'archive',fSort:'sort',fPageSize:'pageSize',
   };
   document.querySelectorAll('[data-folder-view]').forEach(button=>button.addEventListener('click',()=>{

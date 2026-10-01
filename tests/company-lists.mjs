@@ -25,6 +25,7 @@ const dependencies={
   icon:()=>'',companyLocation:c=>c.cidade||'Não informado',classificacao:()=>({color:'var(--blue)'}),
   OFFER_TYPES:{software:'Software'},COMMERCIAL_STAGES:['Nova','Priorizada']
 };
+dependencies.formatCnpj=value=>value;
 const scope=vm.createContext(dependencies);
 vm.runInContext(defaults+'state.oppFilters={...DEFAULT_OPP_FILTERS};'+lists+monitoring,scope);
 scope.renderOportunidades();
@@ -88,6 +89,35 @@ state.route='#/diagnostico';assert.ok(scope.renderDiagnosticoList().includes('Ne
 assert.ok(script.includes('if(detailRoute) bindDiagnostico();'));
 assert.ok(script.includes('listFilters:state.listFilters'));
 assert.ok(!script.includes('Alertas simulados nesta versão'));
+const reviews=[
+  {id:'r0',score:70,analyzedAt:'2026-10-01',evidencias:[]},
+  {id:'r1',score:70,analyzedAt:'2026-10-01',site:'https://example.test',evidencias:[{texto:'Perfil coletado',url:'https://example.test'}]},
+  {id:'r2',score:70,analyzedAt:'2026-10-01',site:'https://example.test',siteAudit:{status:'concluido',finished_at:'2026-10-01'},evidencias:[{texto:'Perfil coletado',url:'https://example.test'}]},
+  {id:'r3',score:70,analyzedAt:'2026-10-01',site:'https://example.test',siteAudit:{status:'concluido',finished_at:'2026-10-01'},cnpj:'11222333000181',cnpjValidatedAt:'2026-10-01',evidencias:[{texto:'Perfil coletado',url:'https://example.test'}]}
+];
+assert.deepEqual(reviews.map(c=>scope.diagnosisReview(c).stage),['evidencias','site','cnpj','registradas']);
+assert.equal(scope.diagnosisReview({evidencias:[{texto:'Sem URL'}]}).evidenceCount,0);
+assert.equal(scope.diagnosisReview({...reviews[3],cnpjActive:false}).stage,'cnpj');
+assert.ok(scope.diagnosisReview(reviews[0]).pending.includes('Localizar ou confirmar o site'));
+state.companies=reviews;state.route='#/diagnostico';scope.setCompanyListFilters({...scope.companyListFilters(),validation:'site',cidade:'todos',archive:'ativas',scoreMin:''});
+assert.deepEqual(Array.from(scope.opportunityDataset(),c=>c.id),['r1']);
+const diagnosisHtml=scope.renderDiagnosisList(reviews,'tabela');
+assert.ok(diagnosisHtml.includes('Evidências com fonte'));
+assert.ok(diagnosisHtml.includes('O que falta validar'));
+assert.ok(!diagnosisHtml.includes('Etapa comercial'));
+const board=scope.renderDiagnosisList(reviews,'funil');
+assert.ok(board.includes('Quadro de validação'));
+assert.ok(!board.includes('data-funnel-status'));
+const diagnosticCsv=scope.buildCompanyCsv(reviews);
+assert.ok(diagnosticCsv.includes('Pendências de validação'));
+state.selectedOpps=['r1'];markup=scope.renderDiagnosticoList();
+assert.ok(markup.includes('id="bulkReanalyze"'));
+assert.ok(!markup.includes('id="bulkStatus"'));
+assert.ok(!markup.includes('id="bulkArchive"'));
+assert.ok(!markup.includes('id="bulkMonitor"'));
+state.route='#/oportunidades';markup=scope.renderOportunidades();
+assert.ok(markup.includes('id="bulkStatus"')===false,'Selection clears when changing scopes');
+assert.ok(scope.renderOppTable(reviews).includes('Etapa comercial'));
 console.log('Company lists passed: independent filters/views, monitored/analysis scope, folders, export isolation, archive, empty states and return preferences. No external calls.');
 
 // Optional browser QA uses only synthetic fixtures and blocks all external traffic.
@@ -138,6 +168,22 @@ if(process.env.LEADSCOPE_BROWSER_QA){
     const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
     assert.equal(overflow,false,'No document-wide horizontal overflow at '+width);
   }
+  await page.evaluate(rows=>{
+    state.companies=rows.map((row,i)=>({...state.companies[0],...row,nome:'Empresa de teste '+i}));
+    navigate('#/diagnostico');setCompanyListFilters({...companyListFilters(),validation:'todos',view:'tabela'});render();
+  },reviews);
+  await page.setViewportSize({width:1440,height:1000});
+  await page.locator('#viewFunnel').click();
+  assert.equal(await page.locator('[data-funnel-status]').count(),0);
+  assert.equal(await page.locator('.funnel-column').count(),4);
+  await page.screenshot({path:'/tmp/leadscope-validacao-1440.png',fullPage:true});
+  await page.locator('#viewCards').click();
+  await page.locator('#openOppFilters').click();
+  await page.locator('#fValidation').selectOption('cnpj');
+  await page.locator('#applyOppFilters').click();
+  assert.equal(await page.locator('.selOpp').count(),1);
+  await page.setViewportSize({width:390,height:1000});
+  await page.screenshot({path:'/tmp/leadscope-validacao-390.png',fullPage:true});
   assert.deepEqual(errors,[]);
   await browser.close();
   console.log('Browser QA passed: desktop/mobile filters, view toggles, selection, export menu, detail return, no page errors or horizontal overflow.');

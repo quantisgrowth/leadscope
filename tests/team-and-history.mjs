@@ -127,6 +127,7 @@ const start=inline.indexOf('function opportunityDataset()'),end=inline.indexOf('
 const state={companies:[{id:'a',folderIds:[],score:50,nome:'A'},{id:'b',folderIds:['folder'],score:70,nome:'B'}],oppFilters:{folderId:'sem_pasta',archive:'ativas',search:'',potencial:'todos',status:'todos',segmento:'todos',cidade:'todos',offerId:'todos',offerType:'todos',scoreMin:'',scoreMax:'',createdFrom:'',createdTo:'',analyzedFrom:'',analyzedTo:'',sort:'score_desc'}};
 const browser=vm.createContext({state,normalizedText:s=>String(s||'').toLowerCase(),companyLocation:c=>c.cidade||'',companyOffer:()=>null});
 Object.assign(browser,{companyListFilters:()=>state.oppFilters,companyListBase:()=>state.companies});
+browser.companyListScope=()=>'oportunidades';
 vm.runInContext(inline.slice(start,end),browser);
 assert.equal(browser.opportunityDataset().length,1);assert.equal(browser.opportunityDataset()[0].id,'a');
 state.oppFilters.folderId='todos';assert.equal(browser.opportunityDataset().length,2);
