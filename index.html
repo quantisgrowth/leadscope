@@ -1057,7 +1057,7 @@ function renderLogin(){
   const isUpdate = state.authMode==='update';
   const isInvite=!!pendingTeamInvite;
   const title = isSignup?(isInvite?'Criar conta para aceitar convite':'Criar sua conta'):isRecover?'Recuperar sua senha':isUpdate?'Criar nova senha':isInvite?'Entrar para aceitar convite':'Entrar na plataforma';
-  const subtitle = isSignup?(isInvite?'Informe seu nome, o e-mail informado no convite e crie uma senha. Após confirmar seu e-mail, entre para aceitar o convite e acessar a equipe.':'Configure sua oferta e encontre as primeiras empresas reais no Google.'):isRecover?'Enviaremos um link seguro para o seu e-mail.':isUpdate?'Use pelo menos 8 caracteres, com maiúscula, minúscula, número e símbolo.':isInvite?'Entre com o mesmo e-mail informado no convite para acessar sua equipe.':'Acesse sua conta para ver as oportunidades priorizadas de hoje.';
+  const subtitle = isSignup?(isInvite?'Informe seu nome, o e-mail informado no convite e crie uma senha. Seu cadastro ficará pendente até o titular aprovar. Não enviamos e-mail neste fluxo.':'Configure sua oferta e encontre as primeiras empresas reais no Google.'):isRecover?'Enviaremos um link seguro para o seu e-mail.':isUpdate?'Use pelo menos 8 caracteres, com maiúscula, minúscula, número e símbolo.':isInvite?'Entre com o mesmo e-mail informado no convite para acessar sua equipe.':'Acesse sua conta para ver as oportunidades priorizadas de hoje.';
   return `
   <div class="login-shell">
     <div class="login-form-side">
@@ -1139,6 +1139,19 @@ function bindLogin(){
     try{
       if(state.authMode==='signup'){
         const nome = (document.getElementById('loginNome')||{}).value || '';
+        if(pendingTeamInvite){
+          const {data:registration,error:registrationError}=await sb.functions.invoke('register-invitation',{body:{token:pendingTeamInvite,email,name:nome,password:pass}});
+          if(registrationError){
+            let message='Não foi possível enviar o cadastro. Consulte o titular.';
+            try{message=(await registrationError.context.json()).error||message;}catch{}
+            throw new Error(message);
+          }
+          setState({authLoading:false,authMode:'signin',authError:null});
+          toast(registration.message);
+          const notice=document.createElement('p');notice.className='muted';notice.textContent=registration.message;
+          document.getElementById('loginBtn').after(notice);
+          return;
+        }
         const { data, error } = await sb.auth.signUp({ email, password: pass, options:{ data:{ nome } } });
         if(error) throw error;
         if(data.session){
@@ -2013,11 +2026,11 @@ async function refreshTeamInvites(){
   host.textContent='Consultando…';
   try{
     const data=await teamRequest({action:'list'});
-    const labels={sending:'Processando',sent:'Pendente de aceitação',failed:'Falha no envio',accepted:'Aceito',revoked:'Revogado'};
-    host.innerHTML=`<h4>Convites</h4>${(data.invitations||[]).map(item=>`<div class="row between wrap" style="gap:8px;padding:10px 0;border-top:1px solid var(--border);"><span>${esc(item.email)} · ${item.role==='viewer'?'Somente leitura':'Colaborador'} · ${esc(labels[item.status]||item.status)}${new Date(item.expires_at)<new Date()&&!['accepted','revoked'].includes(item.status)?' · Expirado':''}</span><div class="row gap-8 wrap">${['sent','failed'].includes(item.status)?`<button class="btn btn-sm" data-invite-action="resend" data-invite-delivery="link" data-invite-id="${esc(item.id)}">Gerar novo link</button><button class="btn btn-sm" data-invite-action="resend" data-invite-delivery="email" data-invite-id="${esc(item.id)}">Reenviar por e-mail</button>`:''}${['sent','failed','sending'].includes(item.status)?`<button class="btn btn-sm" data-invite-action="revoke" data-invite-id="${esc(item.id)}">Revogar</button>`:''}</div></div>`).join('')||'<p>Nenhum convite.</p>'}<h4>Colaboradores</h4>${(data.members||[]).map(item=>`<div class="row between wrap" style="padding:10px 0;"><span>${esc(item.email)} · ${item.role==='viewer'?'Somente leitura':'Colaborador'}</span><button class="btn btn-sm" data-invite-action="remove_member" data-member-id="${esc(item.member_id)}">Remover acesso</button></div>`).join('')||'<p>Nenhum colaborador.</p>'}`;
+    const labels={sending:'Processando',sent:'Pendente de aceitação',failed:'Falha no envio',registering:'Cadastro em processamento',awaiting_approval:'Aguardando sua aprovação',accepted:'Aceito',revoked:'Revogado'};
+    host.innerHTML=`<h4>Convites</h4>${(data.invitations||[]).map(item=>`<div class="row between wrap" style="gap:8px;padding:10px 0;border-top:1px solid var(--border);"><span>${esc(item.candidate_name||'')} ${esc(item.email)} · ${item.role==='viewer'?'Somente leitura':'Colaborador'} · ${esc(labels[item.status]||item.status)}${new Date(item.expires_at)<new Date()&&!['accepted','revoked'].includes(item.status)?' · Expirado':''}</span><div class="row gap-8 wrap">${['sent','failed'].includes(item.status)?`<button class="btn btn-sm" data-invite-action="resend" data-invite-delivery="link" data-invite-id="${esc(item.id)}">Gerar novo link</button><button class="btn btn-sm" data-invite-action="resend" data-invite-delivery="email" data-invite-id="${esc(item.id)}">Reenviar por e-mail</button>`:''}${['awaiting_approval','accepted'].includes(item.status)&&item.candidate_user_id?`<button class="btn btn-sm" data-invite-action="approve" data-invite-id="${esc(item.id)}">Aprovar / repetir ativação</button>` : ''}${['sent','failed','sending','registering','awaiting_approval'].includes(item.status)?`<button class="btn btn-sm" data-invite-action="revoke" data-invite-id="${esc(item.id)}">Revogar</button>`:''}</div></div>`).join('')||'<p>Nenhum convite.</p>'}<h4>Colaboradores</h4>${(data.members||[]).map(item=>`<div class="row between wrap" style="padding:10px 0;"><span>${esc(item.email)} · ${item.role==='viewer'?'Somente leitura':'Colaborador'}${item.manual_activation?' · Ativação manual (e-mail não verificado por mensagem)':''}</span><button class="btn btn-sm" data-invite-action="remove_member" data-member-id="${esc(item.member_id)}">Remover acesso</button></div>`).join('')||'<p>Nenhum colaborador.</p>'}`;
     host.querySelectorAll('[data-invite-action]').forEach(button=>button.onclick=async()=>{
       const action=button.dataset.inviteAction;
-      if(!confirm(action==='resend'?'Gerar outro convite invalida o link anterior. Deseja continuar?':'Confirma revogar este convite ou acesso?')) return;
+      if(!confirm(action==='approve'?'Confirme a identidade dessa pessoa por um canal de confiança antes de aprovar. A ativação manual não comprova que o e-mail pertence a ela. Aprovar acesso com as permissões do convite?':action==='resend'?'Gerar outro convite invalida o link anterior. Deseja continuar?':'Confirma revogar este convite ou acesso?')) return;
       button.disabled=true;
       try{const result=await teamRequest({action,delivery:button.dataset.inviteDelivery,id:button.dataset.inviteId,member_id:button.dataset.memberId});if(result.link) showTeamInviteLink(result);else if(result.message) toast(result.message);await refreshTeamInvites();}
       catch(error){toast(error.message);button.disabled=false;}
@@ -2439,7 +2452,7 @@ function renderConfiguracoes(){
   } else if(tab==='usuarios'){
     inner = `
       <p>${esc(state.user.email||'')} · ${state.isAccountOwner?'Titular da conta':'Colaborador'}</p>
-      ${state.isAccountOwner?`<div class="row gap-8 wrap"><input class="input" id="inviteEmail" type="email" placeholder="E-mail do colaborador" style="max-width:300px;"><select class="input" id="inviteRole" style="max-width:200px;"><option value="editor">Colaborador</option><option value="viewer">Somente leitura</option></select><button class="btn btn-primary" id="createTeamInviteLink">Gerar link de convite</button><button class="btn" id="sendTeamInvite">Enviar por e-mail</button><button class="btn" id="refreshTeamInvites">Atualizar lista</button></div><p class="muted">O link não depende de um serviço de envio. Enviar por e-mail exige remetente configurado. O convite expira em 7 dias e exige o mesmo e-mail confirmado. Colaboradores não se tornam administradores da plataforma.</p><div id="teamInviteLinkResult" class="card" style="margin:16px 0;" hidden></div><div id="teamInvitationList">Clique em Atualizar lista para consultar convites e colaboradores.</div>`:'Somente o titular pode gerenciar colaboradores e convites.'}`;
+      ${state.isAccountOwner?`<div class="row gap-8 wrap"><input class="input" id="inviteEmail" type="email" placeholder="E-mail do colaborador" style="max-width:300px;"><select class="input" id="inviteRole" style="max-width:200px;"><option value="editor">Colaborador</option><option value="viewer">Somente leitura</option></select><button class="btn btn-primary" id="createTeamInviteLink">Gerar link de convite</button><button class="btn" id="sendTeamInvite">Enviar por e-mail</button><button class="btn" id="refreshTeamInvites">Atualizar lista</button></div><p class="muted">O link não depende de um serviço de envio. Enviar por e-mail exige remetente configurado. O convite expira em 7 dias. Novos cadastros pelo link exigem sua aprovação. Ativação manual não comprova a propriedade do e-mail. Colaboradores não se tornam administradores da plataforma.</p><div id="teamInviteLinkResult" class="card" style="margin:16px 0;" hidden></div><div id="teamInvitationList">Clique em Atualizar lista para consultar convites e colaboradores.</div>`:'Somente o titular pode gerenciar colaboradores e convites.'}`;
   } else if(tab==='integracoes'&&isPlatformAdmin){
     inner = `
       <div class="badge badge-blue" style="display:inline-flex;margin-bottom:12px;">Acesso exclusivo do administrador da plataforma</div>

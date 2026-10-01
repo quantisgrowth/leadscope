@@ -43,6 +43,10 @@ O repositório inclui o fluxo manual **Publicar funções do LeadScope**. Ele pu
 
 O fluxo é exclusivamente manual; um novo commit não publica automaticamente no Supabase. O GitHub Pages continua sendo responsável apenas pela interface.
 
+## Cadastro por convite: atualização de 01/10/2026
+
+Novos convidados agora podem cadastrar senha sem envio de e-mail, com aprovação manual do titular. Aplique também o SQL 03 e publique a nova função. As instruções atuais estão em [Cadastro por convite](CADASTRO_POR_CONVITE.md); elas substituem, para novos convidados, as referências abaixo à confirmação obrigatória por mensagem. Não desligue a confirmação global. O SMTP continua necessário para recuperação de senha e outros fluxos de e-mail.
+
 ## 3. Configuração de e-mail
 
 ### Alternativa sem remetente verificado: copiar link

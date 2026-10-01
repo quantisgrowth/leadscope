@@ -9,6 +9,7 @@ assert.equal(imports['@supabase/supabase-js'],'npm:@supabase/supabase-js@2.117.2
 const ts=read('supabase/functions/team-invitations/index.ts').replace(/^import .+;\n/gm,'');
 const envVars={SUPABASE_SERVICE_ROLE_KEY:'FAKE_TEST_SECRET',SUPABASE_URL:'https://test.invalid'};
 let sent=0,lastEmail,acceptedArgs,lastInsert,lastUpdate,oldInvitation,claimLost=false,hourlyCount=0,rpcError=null;
+let activation=null,activationError=null;
 const fakeUser={id:'owner',email:'owner@example.org',email_confirmed_at:'2026-01-01T00:00:00Z'};
 const admin={auth:{admin:{getUserById:async()=>({data:{user:fakeUser}})}},rpc:async(name,args)=>{acceptedArgs=args;return {data:rpcError?null:'account',error:rpcError}},from:()=>{
   let row;
@@ -17,6 +18,7 @@ const admin={auth:{admin:{getUserById:async()=>({data:{user:fakeUser}})}},rpc:as
 }};
 const scope=vm.createContext({Response,crypto:webcrypto,TextEncoder,AbortSignal,URL,Deno:{env:{get:key=>envVars[key]}},createClient:()=>admin,withSupabase:(_,fn)=>fn,accountId:async ctx=>ctx.owner||ctx.userClaims.id,fetch:async(url,options)=>{assert.equal(url,'https://api.resend.com/emails');sent++;lastEmail=JSON.parse(options.body);assert.ok(options.headers['Idempotency-Key']);return {ok:true,json:async()=>({id:'mock-message'})}}});
 const handler=vm.runInContext(stripTypeScriptTypes(ts).replace('export default','const handler =')+'\nhandler.fetch',scope);
+admin.auth.admin.updateUserById=async(id,value)=>{activation={id,...value};return {error:activationError};};
 const request=body=>new Request('https://test.invalid',{method:'POST',body:JSON.stringify(body)});
 const owner={userClaims:{id:'owner'}};
 assert.equal((await handler(request({action:'invite'}),{userClaims:{}})).status,401);
@@ -65,12 +67,26 @@ assert.equal((await handler(request({action:'accept',token:'bad'}),owner)).statu
 fakeUser.email_confirmed_at=null;
 assert.equal((await handler(request({action:'accept',token:'a'.repeat(64)}),owner)).status,403);
 fakeUser.email_confirmed_at='2026-01-01';
+fakeUser.app_metadata={leadscope_activation:'pending_manual'};
+assert.equal((await handler(request({action:'accept',token:'a'.repeat(64)}),owner)).status,403);
+delete fakeUser.app_metadata;
+assert.equal((await handler(request({action:'approve',id:'invite'}),{userClaims:{id:'member'},owner:'owner'})).status,403);
 assert.equal((await handler(request({action:'accept',token:'a'.repeat(64)}),owner)).status,200);
 assert.equal(acceptedArgs.p_email,fakeUser.email);assert.equal(acceptedArgs.p_user,'owner');
 assert.equal(acceptedArgs.p_hash.length,64);assert.notEqual(acceptedArgs.p_hash,'a'.repeat(64));
 rpcError={message:'Convite inválido, expirado ou destinado a outro e-mail'};
 assert.equal((await handler(request({action:'accept',token}),owner)).status,400);
 rpcError=null;
+fakeUser.app_metadata={leadscope_invitation_id:'invite',leadscope_activation:'pending_manual'};
+assert.equal((await handler(request({action:'approve',id:'invite'}),owner)).status,200);
+assert.equal(acceptedArgs.p_owner,'owner');assert.equal(acceptedArgs.p_id,'invite');
+assert.equal(activation.email_confirm,true);
+assert.equal(activation.app_metadata.leadscope_activation,'approved_manual');
+assert.equal(activation.app_metadata.leadscope_email_identity_verified,false);
+assert.equal(activation.app_metadata.leadscope_invitation_id,'invite');
+activationError={message:'temporary error'};
+assert.equal((await handler(request({action:'approve',id:'invite'}),owner)).status,500);
+activationError=null;delete fakeUser.app_metadata;
 
 const inline=read('index.html').match(/<script>([\s\S]*?)<\/script>/)[1];new vm.Script(inline);
 const authStart=inline.indexOf('function initialAuthMode('),authEnd=inline.indexOf('\n}',authStart)+2;

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       sqls_applied:
-        description: Os SQLs 01 e 02 já foram aplicados com sucesso no Supabase?
+        description: Os SQLs 01, 02 e 03 já foram aplicados com sucesso no Supabase?
         required: true
         type: boolean
         default: false
@@ -26,7 +26,7 @@ jobs:
           SQLS_APPLIED: ${{ inputs.sqls_applied }}
         run: |
           if [ "$SQLS_APPLIED" != "true" ] || [ "$GITHUB_REF" != "refs/heads/main" ]; then
-            echo "Execute apenas na main, após aplicar os dois SQLs com sucesso."
+            echo "Execute apenas na main, após aplicar os três SQLs com sucesso."
             exit 1
           fi
       - uses: actions/checkout@v4
@@ -39,10 +39,11 @@ jobs:
         run: |
           node tests/phase4.mjs
           node tests/team-and-history.mjs
+          node tests/manual-registration.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 2.119.0
-      - name: Publicar as seis funções com autenticação habilitada
+      - name: Publicar funções autenticadas e cadastro protegido por token
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
@@ -54,10 +55,11 @@ jobs:
           for function_name in search-places search-google-places reanalyze-opportunities audit-site validate-cnpj team-invitations; do
             supabase functions deploy "$function_name" --project-ref nlzlbrfwaloyxksaevne
           done
+          supabase functions deploy register-invitation --project-ref nlzlbrfwaloyxksaevne --no-verify-jwt
       - name: Conferir inicialização e comunicação com o navegador
         run: node tests/deployment-smoke.mjs
       - name: Registrar resultado
         run: |
-          echo "As seis funções foram publicadas a partir do commit $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
+          echo "As sete funções foram publicadas a partir do commit $GITHUB_SHA. Cadastro usa token de convite; as demais funções exigem JWT." >> "$GITHUB_STEP_SUMMARY"
           echo "Nenhum SQL foi executado, convite enviado ou teste com Apify iniciado por este fluxo." >> "$GITHUB_STEP_SUMMARY"
-          echo "O envio de convites ainda depende dos Secrets de e-mail no Supabase e de um remetente autorizado." >> "$GITHUB_STEP_SUMMARY"
+          echo "Cadastro pelo link exige aprovação manual do titular e não envia e-mail. Envio por e-mail ainda depende de remetente autorizado." >> "$GITHUB_STEP_SUMMARY"

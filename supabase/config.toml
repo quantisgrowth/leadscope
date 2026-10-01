@@ -454,3 +454,10 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/team-invitations/deno.json"
 entrypoint = "./functions/team-invitations/index.ts"
+
+[functions.register-invitation]
+enabled = true
+# Custom authentication: single-use 256-bit invitation token + matching email.
+verify_jwt = false
+import_map = "./functions/register-invitation/deno.json"
+entrypoint = "./functions/register-invitation/index.ts"

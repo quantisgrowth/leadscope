@@ -5,7 +5,7 @@ import { accountId } from '../_shared/account.ts';
 
 const hash = async (value: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
 const escape = (value: string) => value.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]!));
-const fields='id,email,role,status,created_at,sent_at,expires_at,accepted_at';
+const fields='id,email,role,status,created_at,sent_at,expires_at,accepted_at,candidate_name,candidate_user_id,approved_by';
 
 export default { fetch: withSupabase({auth:'user'},async(req,ctx)=>{
   if(req.method!=='POST') return Response.json({error:'Método não permitido'},{status:405});
@@ -22,6 +22,14 @@ export default { fetch: withSupabase({auth:'user'},async(req,ctx)=>{
       if(!/^[a-f0-9]{64}$/.test(token)) return Response.json({error:'Convite inválido'},{status:400});
       const {data:user,error:userError}=await admin.auth.admin.getUserById(userId);
       if(userError||!user.user?.email||!user.user.email_confirmed_at) return Response.json({error:'Confirme seu e-mail antes de aceitar o convite.'},{status:403});
+      if(user.user.app_metadata?.leadscope_activation==='pending_manual') return Response.json({error:'Aguarde a aprovação do titular.'},{status:403});
+      if(user.user.app_metadata?.leadscope_activation==='approved_manual') {
+        const {data:approved}=await admin.from('team_invitations').select('account_id').eq('token_hash',await hash(token)).eq('candidate_user_id',userId).eq('status','accepted').maybeSingle();
+        if(!approved) return Response.json({error:'Convite não corresponde ao cadastro aprovado.'},{status:403});
+        const {data:member}=await admin.from('account_members').select('account_id').eq('member_id',userId).eq('account_id',approved.account_id).maybeSingle();
+        if(!member) return Response.json({error:'Acesso removido.'},{status:403});
+        return Response.json({accepted:true,account_id:approved.account_id});
+      }
       const {data,error}=await admin.rpc('accept_team_invitation',{p_hash:await hash(token),p_user:userId,p_email:user.user.email});
       if(error) return Response.json({error:error.message},{status:400});
       return Response.json({accepted:true,account_id:data});
@@ -36,9 +44,20 @@ export default { fetch: withSupabase({auth:'user'},async(req,ctx)=>{
       // Never expose Auth secrets or invitation hashes to the browser.
       const memberRows=await Promise.all((members||[]).map(async(member)=>{
         const {data}=await admin.auth.admin.getUserById(member.member_id);
-        return {...member,email:data.user?.email||''};
+        return {...member,email:data.user?.email||'',manual_activation:data.user?.app_metadata?.leadscope_activation==='approved_manual'};
       }));
       return Response.json({invitations,members:memberRows});
+    }
+    if(action==='approve') {
+      const {data:candidate,error}=await admin.rpc('approve_manual_invitation',{p_id:String(body.id||''),p_owner:owner});
+      if(error) return Response.json({error:error.message},{status:409});
+      // Auth requires technical activation for password login. This is NOT proof
+      // of email ownership; preserve that distinction in server-set metadata/UI.
+      const {data:existing,error:readError}=await admin.auth.admin.getUserById(candidate);
+      if(readError||!existing.user) throw new Error('Não foi possível consultar o cadastro aprovado. Tente aprovar novamente.');
+      const {error:activationError}=await admin.auth.admin.updateUserById(candidate,{email_confirm:true,app_metadata:{...existing.user.app_metadata,leadscope_activation:'approved_manual',leadscope_email_identity_verified:false}});
+      if(activationError) throw new Error('Aprovação registrada, mas a ativação falhou. Tente aprovar novamente.');
+      return Response.json({message:'Acesso aprovado manualmente. A pessoa já pode entrar com sua senha.'});
     }
     if(action==='remove_member') {
       const {error}=await admin.from('account_members').delete().eq('account_id',owner).eq('member_id',String(body.member_id||''));
@@ -46,7 +65,7 @@ export default { fetch: withSupabase({auth:'user'},async(req,ctx)=>{
       return Response.json({removed:true});
     }
     if(action==='revoke') {
-      const {data,error}=await admin.from('team_invitations').update({status:'revoked'}).eq('account_id',owner).eq('id',String(body.id||'')).in('status',['sending','sent','failed']).select('id').maybeSingle();
+      const {data,error}=await admin.from('team_invitations').update({status:'revoked'}).eq('account_id',owner).eq('id',String(body.id||'')).in('status',['sending','sent','failed','registering','awaiting_approval']).select('id').maybeSingle();
       if(error) throw error;
       if(!data) return Response.json({error:'Convite não encontrado ou já aceito.'},{status:409});
       return Response.json({revoked:true});
