@@ -73,6 +73,25 @@ assert.equal((await handler(request({action:'accept',token}),owner)).status,400)
 rpcError=null;
 
 const inline=read('index.html').match(/<script>([\s\S]*?)<\/script>/)[1];new vm.Script(inline);
+const authStart=inline.indexOf('function initialAuthMode('),authEnd=inline.indexOf('\n}',authStart)+2;
+const authBrowser=vm.createContext({});
+vm.runInContext(inline.slice(authStart,authEnd),authBrowser);
+assert.equal(authBrowser.initialAuthMode(false,token),'signup');
+assert.equal(authBrowser.initialAuthMode(false,''),'signin');
+assert.equal(authBrowser.initialAuthMode(false,'invalid'),'signin');
+assert.equal(authBrowser.initialAuthMode(true,token),'update');
+const loginStart=inline.indexOf('function renderLogin('),loginEnd=inline.indexOf('\nfunction bindLogin',loginStart);
+const loginState={authMode:'signup',authEmail:'',authError:null,authLoading:false};
+const loginBrowser=vm.createContext({state:loginState,pendingTeamInvite:token,icon:()=>'',esc:s=>String(s||'')});
+vm.runInContext(inline.slice(loginStart,loginEnd),loginBrowser);
+let loginHtml=loginBrowser.renderLogin();
+assert.ok(loginHtml.includes('Criar conta para aceitar convite'));
+assert.ok(loginHtml.includes('id="loginNome"'));
+assert.ok(loginHtml.includes('Já tenho conta — entrar'));
+loginState.authMode='signin';loginHtml=loginBrowser.renderLogin();
+assert.ok(loginHtml.includes('Entrar para aceitar convite'));assert.ok(!loginHtml.includes('id="loginNome"'));
+loginState.authMode='update';loginHtml=loginBrowser.renderLogin();
+assert.ok(loginHtml.includes('Criar nova senha'));assert.ok(loginHtml.includes('id="newPass"'));
 const linkNodes=Object.fromEntries(['teamInviteLinkResult','teamLinkRecipient','teamLinkValue','copyTeamInviteLink','closeTeamInviteLink'].map(id=>[id,{value:'',hidden:true,focus(){this.focused=true},select(){this.selected=true},replaceChildren(){this.innerHTML='';linkNodes.teamLinkValue.value=''}}]));
 let copied='',clipboardDenied=false;
 const linkBrowser=vm.createContext({document:{getElementById:id=>linkNodes[id]},navigator:{clipboard:{writeText:async value=>{if(clipboardDenied) throw Error('denied');copied=value}}},toast:()=>{}});

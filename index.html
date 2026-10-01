@@ -289,11 +289,15 @@ const recoveryQuery = new URLSearchParams(window.location.search);
 let passwordRecoveryPending = recoveryHash.get('type') === 'recovery' || recoveryQuery.get('type') === 'recovery';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let pendingTeamInvite=sessionStorage.getItem('leadscope_team_invite')||'';
+if(!/^[a-f0-9]{64}$/.test(pendingTeamInvite)) pendingTeamInvite='';
 if(/^[a-f0-9]{64}$/.test(recoveryQuery.get('team_invite')||'')){
   pendingTeamInvite=recoveryQuery.get('team_invite');
   sessionStorage.setItem('leadscope_team_invite',pendingTeamInvite);
   const cleanUrl=new URL(window.location.href);cleanUrl.searchParams.delete('team_invite');
   history.replaceState({},document.title,cleanUrl.pathname+cleanUrl.search+cleanUrl.hash);
+}
+function initialAuthMode(recoveryPending,inviteToken){
+  return recoveryPending?'update':/^[a-f0-9]{64}$/.test(inviteToken||'')?'signup':'signin';
 }
 
 /* ================= DATA MODEL ================= */
@@ -641,7 +645,7 @@ function saveUiPrefs(){
 }
 
 let state = Object.assign({
-  booting:true, authChecked:false, authError:null, authMode:passwordRecoveryPending?'update':'signin', authLoading:false, authEmail:'',
+  booting:true, authChecked:false, authError:null, authMode:initialAuthMode(passwordRecoveryPending,pendingTeamInvite), authLoading:false, authEmail:'',
   loggedIn:false, onboarded:false, onboardStep:1, userId:null,
   onboarding:{ empresa:'', site:'', segmento:'', cidade:'', servico:'', ticket:'', descricao:'', problema:'',
     segmentosDesejados:'', regiao:'', porte:'Pequeno e médio porte', palavrasChave:'', qtdOportunidades:'20',
@@ -1051,8 +1055,9 @@ function renderLogin(){
   const isSignup = state.authMode==='signup';
   const isRecover = state.authMode==='recover';
   const isUpdate = state.authMode==='update';
-  const title = isSignup?'Criar sua conta':isRecover?'Recuperar sua senha':isUpdate?'Criar nova senha':'Entrar na plataforma';
-  const subtitle = isSignup?'Configure sua oferta e encontre as primeiras empresas reais no Google.':isRecover?'Enviaremos um link seguro para o seu e-mail.':isUpdate?'Use pelo menos 8 caracteres, com maiúscula, minúscula, número e símbolo.':'Acesse sua conta para ver as oportunidades priorizadas de hoje.';
+  const isInvite=!!pendingTeamInvite;
+  const title = isSignup?(isInvite?'Criar conta para aceitar convite':'Criar sua conta'):isRecover?'Recuperar sua senha':isUpdate?'Criar nova senha':isInvite?'Entrar para aceitar convite':'Entrar na plataforma';
+  const subtitle = isSignup?(isInvite?'Informe seu nome, o e-mail informado no convite e crie uma senha. Após confirmar seu e-mail, entre para aceitar o convite e acessar a equipe.':'Configure sua oferta e encontre as primeiras empresas reais no Google.'):isRecover?'Enviaremos um link seguro para o seu e-mail.':isUpdate?'Use pelo menos 8 caracteres, com maiúscula, minúscula, número e símbolo.':isInvite?'Entre com o mesmo e-mail informado no convite para acessar sua equipe.':'Acesse sua conta para ver as oportunidades priorizadas de hoje.';
   return `
   <div class="login-shell">
     <div class="login-form-side">
@@ -1070,7 +1075,7 @@ function renderLogin(){
         ${isUpdate?`<div style="text-align:center;margin-top:16px;"><button type="button" class="text-action" id="requestNewRecovery">Solicitar outro link de recuperação</button></div>`:''}
         ${!isUpdate?`<div class="row between" style="margin-top:16px;">
           <span class="muted" style="font-size:12.5px;">${isSignup ? 'Já tem uma conta?' : 'Ainda não tem conta?'}</span>
-          <button type="button" class="text-action" id="toggleAuthMode">${isSignup||isRecover ? 'Voltar para entrar' : 'Criar conta'}</button>
+          <button type="button" class="text-action" id="toggleAuthMode">${isSignup ? 'Já tenho conta — entrar' : isRecover ? 'Voltar para entrar' : 'Criar conta'}</button>
         </div>`:''}
       </div>
     </div>
