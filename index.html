@@ -333,6 +333,11 @@ function potencialBand(score){ return score>=70?'alto':score>=40?'medio':'baixo'
 function fmtDate(d){ return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'}); }
 function fmtDateTime(value){ const d=new Date(value); return Number.isNaN(d.getTime())?'—':d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
 function normalizeText(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
+function formatCnpj(value){
+  const clean=String(value||'').toUpperCase().replace(/[^0-9A-Z]/g,'').slice(0,14);
+  if(clean.length!==14) return clean;
+  return `${clean.slice(0,2)}.${clean.slice(2,5)}.${clean.slice(5,8)}/${clean.slice(8,12)}-${clean.slice(12)}`;
+}
 
 function formatOpeningHours(sourcePayload){
   const rows=sourcePayload&&Array.isArray(sourcePayload.openingHours) ? sourcePayload.openingHours : [];
@@ -451,6 +456,11 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds, of
     archivedAt:row.archived_at||null,
     folderIds:folderIds||[],
     mensagemGerada: row.mensagem_gerada, mensagemTom: row.mensagem_tom || 'consultivo', mensagemUtilizada: !!row.mensagem_utilizada,
+    cnpj:row.cnpj||'', cnpjStatus:row.cnpj_status||'', cnpjActive:row.cnpj_active,
+    cnpjLegalName:row.cnpj_legal_name||'', cnpjTradeName:row.cnpj_trade_name||'',
+    cnpjCnaeCode:row.cnpj_cnae_code||'', cnpjCnaeDescription:row.cnpj_cnae_description||'',
+    cnpjSize:row.cnpj_size||'', cnpjOpeningDate:row.cnpj_opening_date||null,
+    cnpjIdentityScore:row.cnpj_identity_score, cnpjValidatedAt:row.cnpj_validated_at||null,
     perfil:{
       categoria:row.segmento || 'Não informada', horarios:formatOpeningHours(sourcePayload),
       respondeuAvaliacoes:null, completude:null,
@@ -1770,6 +1780,9 @@ function verificationBadge(v){
 function renderDetailTab(c, tab){
   if(tab==='perfil'){
     const extraCategories=(c.categorias||[]).filter(category=>normalizeText(category)!==normalizeText(c.perfil.categoria));
+    const cnpjBadge=c.cnpjValidatedAt
+      ? `<span class="badge ${c.cnpjActive?'badge-blue':'badge-warn'}">${c.cnpjActive?icon('check'):icon('alert')} ${esc(c.cnpjStatus||'Consultado')}</span>`
+      : '<span class="badge badge-gray">Não validado</span>';
     return `
     ${kv('Categoria', esc(c.perfil.categoria||'Não informada'))}
     ${extraCategories.length?kv('Categorias adicionais',extraCategories.map(esc).join(', ')):''}
@@ -1777,6 +1790,21 @@ function renderDetailTab(c, tab){
     ${kv('Telefone', esc(c.telefone||'Não informado'))}
     ${kv('Horários', esc(c.perfil.horarios||'Não informado'))}
     ${kv('Site', externalSiteLink(c.site))}
+    <div class="divider"></div>
+    <div class="row between wrap" style="gap:12px;margin-bottom:10px;"><div><div class="card-title" style="font-size:13.5px;">Validação cadastral</div><div class="muted" style="font-size:11.5px;">Consulte a situação da empresa em um cadastro público de pessoa jurídica.</div></div>${cnpjBadge}</div>
+    <div class="row gap-8 wrap" style="align-items:stretch;margin-bottom:12px;"><input class="input" id="companyCnpjInput" value="${esc(formatCnpj(c.cnpj))}" placeholder="00.000.000/0000-00" inputmode="text" maxlength="18" style="max-width:260px;"><button class="btn btn-primary" id="validateCnpjBtn">${c.cnpjValidatedAt?'Validar novamente':'Validar CNPJ'}</button></div>
+    ${c.cnpjValidatedAt?`
+      ${kv('CNPJ', esc(formatCnpj(c.cnpj)))}
+      ${kv('Situação cadastral', cnpjBadge)}
+      ${kv('Razão social', esc(c.cnpjLegalName||'Não informada'))}
+      ${c.cnpjTradeName?kv('Nome fantasia',esc(c.cnpjTradeName)):''}
+      ${kv('Atividade principal', esc([c.cnpjCnaeCode,c.cnpjCnaeDescription].filter(Boolean).join(' · ')||'Não informada'))}
+      ${kv('Porte', esc(c.cnpjSize||'Não informado'))}
+      ${kv('Início da atividade', c.cnpjOpeningDate?esc(fmtDate(new Date(c.cnpjOpeningDate+'T00:00:00'))):'Não informado')}
+      ${kv('Correspondência com o perfil', `<span class="badge ${Number(c.cnpjIdentityScore)>=50?'badge-blue':Number(c.cnpjIdentityScore)>=25?'badge-warn':'badge-gray'}">${esc(Number(c.cnpjIdentityScore)||0)}%</span>`)}
+      <div class="verification-note" style="margin-top:12px;">A situação cadastral confirma o registro informado. A correspondência compara nome, cidade e telefone com o perfil coletado e deve ser revisada quando estiver baixa.</div>
+    `:''}
+    <div class="divider"></div>
     ${kv('Nota', c.nota!=null?esc(c.nota+' / 5.0'):'Não informado')}
     ${kv('Número de avaliações', c.avaliacoes!=null?esc(c.avaliacoes):'Não informado')}
     ${kv('Percentual de avaliações respondidas', verificationBadge(c.perfil.respondeuAvaliacoes))}
@@ -1863,6 +1891,25 @@ async function reanalyzeOpportunities(companyIds,button){
     if(button&&document.body.contains(button)){ button.disabled=false; button.textContent=button.dataset.originalText||'Reanalisar'; }
   }
 }
+async function validateCompanyCnpj(){
+  const company=state.companies.find(item=>item.id===currentDiagId);
+  const input=document.getElementById('companyCnpjInput');
+  const button=document.getElementById('validateCnpjBtn');
+  if(!company||!input||!button) return;
+  const cnpj=input.value.toUpperCase().replace(/[^0-9A-Z]/g,'');
+  if(cnpj.length!==14){ toast('Informe um CNPJ com 14 caracteres.'); input.focus(); return; }
+  button.disabled=true; button.textContent='Consultando cadastro…';
+  try{
+    const {data,error}=await sb.functions.invoke('validate-cnpj',{body:{company_id:company.id,cnpj}});
+    if(error) throw new Error(await edgeFunctionErrorMessage(error));
+    if(data&&data.error) throw new Error(data.error);
+    await loadAllData(state.userId);
+    toast(data&&data.active?'CNPJ validado e situação ativa confirmada.':'CNPJ consultado. Revise a situação cadastral encontrada.');
+  }catch(error){
+    button.disabled=false; button.textContent=company.cnpjValidatedAt?'Validar novamente':'Validar CNPJ';
+    toast('Não foi possível validar o CNPJ: '+((error&&error.message)||'tente novamente.'));
+  }
+}
 async function runSiteAudit(){
   const company=state.companies.find(item=>item.id===currentDiagId);
   const button=document.getElementById('auditSiteBtn');
@@ -1917,6 +1964,13 @@ function bindDiagnostico(){
   if(auditSiteBtn) auditSiteBtn.addEventListener('click',runSiteAudit);
   const reanalyzeCompanyBtn=document.getElementById('reanalyzeCompanyBtn');
   if(reanalyzeCompanyBtn) reanalyzeCompanyBtn.addEventListener('click',()=>reanalyzeOpportunities([currentDiagId],reanalyzeCompanyBtn));
+  const companyCnpjInput=document.getElementById('companyCnpjInput');
+  if(companyCnpjInput){
+    companyCnpjInput.addEventListener('blur',()=>{ companyCnpjInput.value=formatCnpj(companyCnpjInput.value); });
+    companyCnpjInput.addEventListener('keydown',event=>{ if(event.key==='Enter') validateCompanyCnpj(); });
+  }
+  const validateCnpjBtn=document.getElementById('validateCnpjBtn');
+  if(validateCnpjBtn) validateCnpjBtn.addEventListener('click',validateCompanyCnpj);
   document.querySelectorAll('[data-setstatus]').forEach(el=>{
     el.addEventListener('click', async ()=>{
       const c = state.companies.find(x=>x.id===currentDiagId);
