@@ -30,6 +30,19 @@ Mantenha a verificação de JWT habilitada. Se usar o editor do painel, preserve
 
 Até os SQLs e as funções serem instalados, os convites e as novas proteções de servidor não estão ativos. A interface pode aparecer antes da instalação porque é hospedada separadamente no GitHub Pages. Instale tudo na mesma janela de manutenção.
 
+### Publicação pelo GitHub, sem instalar a CLI no computador
+
+O repositório inclui o fluxo manual **Publicar funções do LeadScope**. Ele publica somente as seis funções acima no projeto `nlzlbrfwaloyxksaevne`, com suas dependências e verificação de JWT. Não executa SQL, não altera limites de cobrança, não envia convites e não consulta o Apify. Segue a [orientação oficial de publicação via GitHub Actions](https://supabase.com/docs/guides/functions/deploy#github-actions).
+
+1. Após aplicar os dois SQLs com sucesso, gere um token de acesso pessoal no [Supabase](https://supabase.com/dashboard/account/tokens). Não use a chave pública nem a chave `service_role` para essa etapa. O token concede acesso administrativo à conta: mantenha-o privado e revogue-o quando não precisar mais.
+2. No GitHub, abra **Settings → Secrets and variables → Actions → New repository secret** e salve o token com o nome `SUPABASE_ACCESS_TOKEN`. Nunca cole o token em arquivos, commits ou mensagens.
+3. Configure também os três Secrets de e-mail descritos na próxima seção, exclusivamente no Supabase.
+4. Abra **Actions → Publicar funções do LeadScope → Run workflow**, escolha `main`, marque a confirmação de que os SQLs foram aplicados e execute.
+5. Aguarde todas as etapas ficarem verdes. Se falhar, não considere a publicação concluída: funções publicadas antes da falha podem já ter sido atualizadas. Corrija a causa e execute novamente o fluxo (não os SQLs).
+6. Confira as funções no painel do Supabase e execute o roteiro de testes abaixo. O sucesso da publicação não comprova a entrega de e-mail ou o funcionamento real das permissões.
+
+O fluxo é exclusivamente manual; um novo commit não publica automaticamente no Supabase. O GitHub Pages continua sendo responsável apenas pela interface.
+
 ## 3. Configuração de e-mail
 
 A nova função utiliza Resend para o convite, sem contratar serviço automaticamente. Se não houver conta ou domínio verificado, configure-os antes de usar. Guarde exclusivamente nos Secrets das funções:

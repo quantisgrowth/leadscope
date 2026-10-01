@@ -436,3 +436,21 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/audit-site/deno.json"
 entrypoint = "./functions/audit-site/index.ts"
+
+[functions.reanalyze-opportunities]
+enabled = true
+verify_jwt = true
+import_map = "./functions/reanalyze-opportunities/deno.json"
+entrypoint = "./functions/reanalyze-opportunities/index.ts"
+
+[functions.validate-cnpj]
+enabled = true
+verify_jwt = true
+import_map = "./functions/validate-cnpj/deno.json"
+entrypoint = "./functions/validate-cnpj/index.ts"
+
+[functions.team-invitations]
+enabled = true
+verify_jwt = true
+import_map = "./functions/team-invitations/deno.json"
+entrypoint = "./functions/team-invitations/index.ts"
