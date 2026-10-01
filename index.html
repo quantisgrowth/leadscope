@@ -637,14 +637,14 @@ const DEFAULT_OPP_FILTERS = {
 const DEFAULT_UI_PREFS = {
   route:'#/overview', sidebarOpen:false,
   diagTone:'consultivo', detailTab:'perfil', configTab:'perfil',
-  theme:'dark', diagReturnRoute:'#/oportunidades', oppFilters:DEFAULT_OPP_FILTERS,
+  theme:'dark', diagReturnRoute:'#/oportunidades', oppFilters:DEFAULT_OPP_FILTERS, listFilters:{},
 };
 function loadUiPrefs(){
   try{
     const raw = localStorage.getItem('leadscope_ui_prefs_v1');
     if(raw){
       const parsed=JSON.parse(raw);
-      return Object.assign({}, DEFAULT_UI_PREFS, parsed, {oppFilters:Object.assign({}, DEFAULT_OPP_FILTERS, parsed.oppFilters||{})});
+      return Object.assign({}, DEFAULT_UI_PREFS, parsed, {oppFilters:Object.assign({}, DEFAULT_OPP_FILTERS, parsed.oppFilters||{}),listFilters:{diagnostico:Object.assign({},DEFAULT_OPP_FILTERS,parsed.listFilters?.diagnostico||{}),monitoradas:Object.assign({},DEFAULT_OPP_FILTERS,parsed.listFilters?.monitoradas||{})}});
     }
   }catch(e){}
   return JSON.parse(JSON.stringify(DEFAULT_UI_PREFS));
@@ -654,7 +654,7 @@ function saveUiPrefs(){
     localStorage.setItem('leadscope_ui_prefs_v1', JSON.stringify({
       route: state.route, sidebarOpen: state.sidebarOpen, diagTone: state.diagTone,
       detailTab: state.detailTab, configTab: state.configTab, theme:state.theme,
-      diagReturnRoute:state.diagReturnRoute, oppFilters: state.oppFilters,
+      diagReturnRoute:state.diagReturnRoute, oppFilters: state.oppFilters, listFilters:state.listFilters,
     }));
   }catch(e){}
 }
@@ -1559,12 +1559,38 @@ function bindRadarProcessing(){
 }
 
 /* ================= OPORTUNIDADES ================= */
+function companyListScope(){
+  const route=(state.route||'').split('/')[1];
+  return route==='monitoradas'?'monitoradas':['diagnostico','empresa'].includes(route)?'diagnostico':'oportunidades';
+}
+function companyListFilters(){
+  const scope=companyListScope();
+  if(scope==='oportunidades')return state.oppFilters;
+  state.listFilters=state.listFilters||{};
+  return state.listFilters[scope]||(state.listFilters[scope]=Object.assign({},DEFAULT_OPP_FILTERS));
+}
+function setCompanyListFilters(filters){
+  const scope=companyListScope();
+  if(scope==='oportunidades')state.oppFilters=filters;
+  else {state.listFilters=state.listFilters||{};state.listFilters[scope]=filters;}
+}
+function companyListBase(){
+  if(companyListScope()==='monitoradas')return state.companies.filter(c=>c.monitorada);
+  if(companyListScope()==='diagnostico')return state.companies.filter(c=>c.score!=null&&Number.isFinite(Number(c.score))&&c.analyzedAt);
+  return state.companies;
+}
+function activateCompanyList(){
+  const scope=companyListScope();
+  if(state.activeCompanyList!==scope){
+    state.activeCompanyList=scope;state.selectedOpps=[];state.oppFilterOpen=false;
+  }
+}
 function dateKey(value){ return value ? String(value).slice(0,10) : ''; }
 function opportunityExportRows(mode){
   if(mode==='filtered')return opportunityDataset();
   if(mode!=='selected')throw new Error('Opção de exportação inválida.');
   const selected=new Set(state.selectedOpps);
-  return state.companies.filter(company=>selected.has(company.id));
+  return companyListBase().filter(company=>selected.has(company.id));
 }
 function csvCell(value){
   let text=value==null?'':String(value);
@@ -1605,7 +1631,7 @@ function companyOffer(c){
   if(c.offerRecommendation&&c.offerRecommendation.offer) return c.offerRecommendation.offer;
   return state.offers.find(offer=>offer.nome===c.servicoRecomendado)||null;
 }
-function activeCompanies(){ return state.companies.filter(company=>!company.archivedAt); }
+function activeCompanies(){ return companyListBase().filter(company=>!company.archivedAt); }
 function folderCompanyCount(folderId){ return activeCompanies().filter(company=>(company.folderIds||[]).includes(folderId)).length; }
 function folderFavorites(){
   try{const value=JSON.parse(localStorage.getItem('leadscope_folder_favorites_'+(state.authUserId||state.userId))||'[]');return Array.isArray(value)?value.filter(id=>state.folders.some(folder=>folder.id===id)).slice(0,3):[];}catch{return [];}
@@ -1624,13 +1650,15 @@ function renderFolderPicker(currentFolder){
     <dialog class="folder-manager" id="oppFolderManager" aria-labelledby="folderManagerTitle"><div class="row between"><h3 id="folderManagerTitle">${state.readOnly?'Pastas':'Gerenciar pastas'}</h3><button class="icon-btn" id="closeFolderManager" aria-label="Fechar gerenciamento de pastas">×</button></div><p class="muted">Excluir uma pasta não exclui as empresas ou o histórico.</p><div class="folder-manager-list">${folders.map(folder=>`<div class="folder-manager-row"><span class="folder-manager-name">${esc(folder.nome)} <span class="folder-count">(${folderCompanyCount(folder.id)})</span></span>${!state.readOnly?`<button class="btn btn-sm" data-rename-folder="${esc(folder.id)}">Renomear</button><button class="btn btn-sm btn-danger" data-delete-folder="${esc(folder.id)}">Excluir pasta</button>`:''}</div>`).join('')||'<p class="muted">Nenhuma pasta cadastrada.</p>'}</div></dialog>`;
 }
 function renderOpportunityEmpty(){
-  const folder=state.folders.find(item=>item.id===state.oppFilters.folderId);
-  const emptyFolder=folder&&folderCompanyCount(folder.id)===0&&state.oppFilters.archive==='ativas';
-  return `<div class="card empty">${icon('target')}<h4>${emptyFolder?'Esta pasta ainda não tem empresas':'Nenhuma oportunidade encontrada'}</h4><p>${emptyFolder?'Selecione empresas em Todas e use Adicionar a uma pasta.':'Ajuste os filtros para ver mais resultados.'}</p><button class="btn btn-primary" id="viewAllOpportunities">Ver todas as oportunidades</button></div>`;
+  const scope=companyListScope();
+  if(!companyListBase().length&&scope!=='oportunidades')return `<div class="card empty">${icon('building')}<h4>${scope==='monitoradas'?'Nenhuma empresa monitorada ainda':'Nenhum diagnóstico disponível'}</h4><p>${scope==='monitoradas'?'Abra uma empresa em Oportunidades e clique em Monitorar empresa.':'Crie um radar para coletar empresas e gerar análises.'}</p><button class="btn btn-primary" data-nav="#/oportunidades">Ver oportunidades</button></div>`;
+  const folder=state.folders.find(item=>item.id===companyListFilters().folderId);
+  const emptyFolder=folder&&folderCompanyCount(folder.id)===0&&companyListFilters().archive==='ativas';
+  return `<div class="card empty">${icon('target')}<h4>${emptyFolder?'Esta pasta ainda não tem empresas':scope==='oportunidades'?'Nenhuma oportunidade encontrada':'Nenhuma empresa encontrada'}</h4><p>${emptyFolder?'Selecione empresas em Todas e use Adicionar a uma pasta.':'Ajuste os filtros para ver mais resultados.'}</p><button class="btn btn-primary" id="viewAllOpportunities">${scope==='oportunidades'?'Ver todas as oportunidades':'Limpar filtros'}</button></div>`;
 }
 function opportunityDataset(){
-  const f=state.oppFilters;
-  let list=state.companies.slice();
+  const f=companyListFilters();
+  let list=companyListBase().slice();
   if(f.archive==='ativas') list=list.filter(c=>!c.archivedAt);
   else if(f.archive==='arquivadas') list=list.filter(c=>!!c.archivedAt);
   if(f.folderId==='sem_pasta') list=list.filter(c=>!(c.folderIds||[]).length);
@@ -1673,11 +1701,14 @@ function opportunityFilterChips(f){
   return values.filter(item=>item[1]);
 }
 function renderOportunidades(){
-  const f = state.oppFilters;
+  activateCompanyList();
+  const scope=companyListScope();
+  const title=scope==='monitoradas'?'Empresas monitoradas':scope==='diagnostico'?'Diagnósticos':'Oportunidades';
+  const f = companyListFilters();
   const list=opportunityDataset();
-  const statusOptions=[...new Set(state.companies.map(c=>c.status).filter(Boolean))].sort();
-  const segments=[...new Set(state.companies.map(c=>c.segmento).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
-  const cities=[...new Set(state.companies.map(c=>c.cidade||companyLocation(c)).filter(value=>value&&value!=='Não informado'))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  const statusOptions=[...new Set(companyListBase().map(c=>c.status).filter(Boolean))].sort();
+  const segments=[...new Set(companyListBase().map(c=>c.segmento).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  const cities=[...new Set(companyListBase().map(c=>c.cidade||companyLocation(c)).filter(value=>value&&value!=='Não informado'))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
   const pageSize=Math.max(1,Number(f.pageSize)||20);
   const pages=Math.max(1,Math.ceil(list.length/pageSize));
   f.page=Math.min(Math.max(1,Number(f.page)||1),pages);
@@ -1685,14 +1716,14 @@ function renderOportunidades(){
   const chips=opportunityFilterChips(f);
   const activeTotal=activeCompanies().length;
   const withoutFolderTotal=activeCompanies().filter(c=>!(c.folderIds||[]).length).length;
-  const archivedTotal=state.companies.length-activeTotal;
+  const archivedTotal=companyListBase().length-activeTotal;
   const currentFolder=state.folders.find(folder=>folder.id===f.folderId);
 
   return `
   <div class="row between wrap" style="margin-bottom:4px;">
     <div>
-      <h1 class="page-title">Oportunidades</h1>
-      <p class="page-sub">${list.length} oportunidade${list.length===1?'':'s'} nesta visualização · página ${f.page} de ${pages}</p>
+      <h1 class="page-title">${title}</h1>
+      <p class="page-sub">${list.length} empresa${list.length===1?'':'s'} nesta visualização · página ${f.page} de ${pages}</p>
     </div>
     <div class="row gap-8">
       <button class="btn btn-sm ${f.view==='tabela'?'btn-primary':''}" id="viewTabela">Tabela</button>
@@ -1702,7 +1733,8 @@ function renderOportunidades(){
     </div>
   </div>
 
-  <div class="folder-strip" aria-label="Visualizações de oportunidades">
+  ${scope==='monitoradas'?'<p class="page-sub">O monitoramento automático não está ativado. Esta lista organiza as empresas acompanhadas; a reanálise é manual.</p>':scope==='diagnostico'?'<p class="page-sub">Consulte as análises disponíveis e abra uma empresa para ver as evidências.</p>':''}
+  <div class="folder-strip" aria-label="Visualizações de empresas">
     <button class="folder-view ${f.folderId==='todos'&&f.archive==='ativas'?'active':''}" data-folder-view="todos" data-archive-view="ativas">Todas <span class="folder-count">${activeTotal}</span></button>
     <button class="folder-view ${f.folderId==='sem_pasta'&&f.archive==='ativas'?'active':''}" data-folder-view="sem_pasta" data-archive-view="ativas">Sem pasta <span class="folder-count">${withoutFolderTotal}</span></button>
     <button class="folder-view ${f.archive==='arquivadas'?'active':''}" data-folder-view="todos" data-archive-view="arquivadas">Arquivadas <span class="folder-count">${archivedTotal}</span></button>
@@ -1764,7 +1796,7 @@ function renderOppTable(list){
           <td class="muted">${companyLocation(c)}</td>
           <td style="font-weight:800;color:${classificacao(c.score).color}">${c.score}</td>
           <td><span class="badge ${c.potencial==='alto'?'badge-blue':c.potencial==='medio'?'badge-warn':'badge-gray'}">${c.potencial==='alto'?'Alto':c.potencial==='medio'?'Médio':'Baixo'}</span></td>
-          <td class="muted" style="max-width:220px;">${c.sinais[0].texto}</td>
+          <td class="muted" style="max-width:220px;">${esc(c.sinais?.[0]?.texto||'Nenhum sinal registrado')}</td>
           <td class="muted" style="max-width:200px;">${c.servicoRecomendado}</td>
           <td class="muted">${c.confianca}</td>
           <td><span class="badge ${statusColor(c.status)}">${c.status}</span></td>
@@ -1787,7 +1819,7 @@ function renderOppCards(list){
         </div>
         <div style="font-weight:700;font-size:14.5px;">${c.nome}</div>
         <div class="muted" style="font-size:12.5px;margin-bottom:10px;">${c.segmento} · ${companyLocation(c)}</div>
-        <div class="muted" style="font-size:12.5px;margin-bottom:8px;">${c.sinais[0].texto}</div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:8px;">${esc(c.sinais?.[0]?.texto||'Nenhum sinal registrado')}</div>
         <div class="muted" style="font-size:11.5px;margin-bottom:12px;">Análise: ${c.analysisDate||'não realizada'} · Criação: ${c.createdDate||'—'}</div>
         <div class="row between">
           <span class="badge ${statusColor(c.status)}">${c.status}</span>
@@ -1814,27 +1846,7 @@ function renderOppFunnel(list){
 }
 
 /* ================= DIAGNOSTICO LIST (fallback route) ================= */
-function renderDiagnosticoList(){
-  const top = [...state.companies].sort((a,b)=>b.score-a.score);
-  return `
-  <h1 class="page-title">Diagnósticos</h1>
-  <p class="page-sub">Selecione uma empresa para abrir o diagnóstico completo.</p>
-  <div class="card" style="padding:0;">
-    <div class="table-scroll">
-    <table>
-      <thead><tr><th>Empresa</th><th>Segmento</th><th>Score</th><th>Confiança</th><th>Última atualização</th><th></th></tr></thead>
-      <tbody>
-      ${top.map(c=>`<tr class="row-hover">
-        <td style="font-weight:600;">${c.nome}</td><td class="muted">${c.segmento}</td>
-        <td style="font-weight:800;color:${classificacao(c.score).color}">${c.score}</td>
-        <td class="muted">${c.confianca}</td><td class="muted">${c.ultimaAtualizacao}</td>
-        <td><button class="btn btn-sm" data-diag="${c.id}">Abrir</button></td>
-      </tr>`).join('')}
-      </tbody>
-    </table>
-    </div>
-  </div>`;
-}
+function renderDiagnosticoList(){ return renderOportunidades(); }
 
 /* ================= DIAGNOSTICO (empresa) ================= */
 let currentDiagId = null;
@@ -2287,44 +2299,7 @@ function bindDiagnostico(){
 }
 
 /* ================= MONITORADAS ================= */
-function renderMonitoradas(){
-  const monitored = state.companies.filter(c=>c.monitorada);
-  const alerts = [
-    'Nova avaliação negativa', 'Queda na nota média', 'Site ficou indisponível', 'Formulário deixou de funcionar',
-    'Alteração de telefone', 'Novo canal de contato', 'Aumento no volume de avaliações', 'Concorrente melhorou sua presença digital'
-  ];
-  if(!monitored.length){
-    return `
-    <h1 class="page-title">Empresas monitoradas</h1>
-    <p class="page-sub">Acompanhe mudanças recentes nas empresas de interesse.</p>
-    <div class="card empty">${icon('building')}<h4>Nenhuma empresa monitorada ainda</h4><p>Abra o diagnóstico de uma oportunidade e clique em "Monitorar empresa" para acompanhá-la aqui.</p><button class="btn btn-primary" data-nav="#/oportunidades">Ver oportunidades</button></div>`;
-  }
-  return `
-  <h1 class="page-title">Empresas monitoradas</h1>
-  <p class="page-sub">Acompanhe mudanças recentes nas empresas de interesse. Alertas simulados nesta versão.</p>
-  <div class="card" style="margin-bottom:18px;">
-    <div class="row gap-12 wrap between">
-      <span class="muted" style="font-size:13px;">Frequência de verificação</span>
-      <div class="pill-group">
-        <span class="pill active">Diária</span><span class="pill">Semanal</span><span class="pill">Mensal</span>
-      </div>
-    </div>
-  </div>
-  <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr));">
-    ${monitored.map((c,idx)=>`
-      <div class="card">
-        <div class="row between" style="margin-bottom:8px;">
-          <span style="font-weight:700;font-size:14px;">${c.nome}</span>
-          <span class="badge ${statusColor(c.status)}">${c.status}</span>
-        </div>
-        <div class="muted" style="font-size:12.5px;margin-bottom:12px;">${c.segmento} · ${companyLocation(c)}</div>
-        <div class="badge badge-warn" style="display:flex;margin-bottom:8px;">${icon('alert')} ${alerts[idx%alerts.length]}</div>
-        <div class="muted" style="font-size:11.5px;">Detectado em ${c.ultimaAtualizacao}</div>
-        <div class="divider"></div>
-        <button class="btn btn-sm btn-block" data-diag="${c.id}">Ver diagnóstico atualizado</button>
-      </div>`).join('')}
-  </div>`;
-}
+function renderMonitoradas(){ return renderOportunidades(); }
 
 /* ================= RELATORIOS ================= */
 function renderRelatorios(){
@@ -2572,8 +2547,9 @@ function bindPageEvents(route){
     });
   });
   if(route==='radar') bindRadarProcessing();
-  if(route==='oportunidades') bindOportunidades();
-  if(route.startsWith('diag')||route==='empresa') bindDiagnostico();
+  const detailRoute=(route==='diagnostico'||route==='empresa')&&!!(state.route||'').split('/')[2];
+  if(route==='oportunidades'||route==='monitoradas'||((route==='diagnostico'||route==='empresa')&&!detailRoute)) bindOportunidades();
+  if(detailRoute) bindDiagnostico();
   if(route==='relatorios') bindRelatorios();
   if(route==='resultados') bindResultados();
   if(route==='configuracoes') bindConfiguracoes();
@@ -2584,8 +2560,8 @@ function bindPageEvents(route){
 }
 function bindOportunidades(){
   const resetOpportunityFilters=()=>{
-    const layout={view:state.oppFilters.view,pageSize:state.oppFilters.pageSize,sort:state.oppFilters.sort};
-    state.oppFilters=Object.assign({},JSON.parse(JSON.stringify(DEFAULT_OPP_FILTERS)),layout);
+    const layout={view:companyListFilters().view,pageSize:companyListFilters().pageSize,sort:companyListFilters().sort};
+    setCompanyListFilters(Object.assign({},DEFAULT_OPP_FILTERS,layout));
     state.selectedOpps=[];
   };
   const picker=document.getElementById('oppFolderPicker'),folderSearch=document.getElementById('folderMenuSearch');
@@ -2609,18 +2585,18 @@ function bindOportunidades(){
   manager?.addEventListener('click',event=>{if(event.target===manager){const bounds=manager.getBoundingClientRect();if(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom)manager.close();}});
   document.getElementById('viewAllOpportunities')?.addEventListener('click',()=>{resetOpportunityFilters();setState({});});
   const vt = document.getElementById('viewTabela'), vc = document.getElementById('viewCards'), vf=document.getElementById('viewFunnel');
-  if(vt) vt.addEventListener('click', ()=>{ state.oppFilters.view='tabela'; setState({}); });
-  if(vc) vc.addEventListener('click', ()=>{ state.oppFilters.view='cards'; setState({}); });
-  if(vf) vf.addEventListener('click', ()=>{ state.oppFilters.view='funil'; state.oppFilters.page=1; setState({}); });
+  if(vt) vt.addEventListener('click', ()=>{ companyListFilters().view='tabela'; setState({}); });
+  if(vc) vc.addEventListener('click', ()=>{ companyListFilters().view='cards'; setState({}); });
+  if(vf) vf.addEventListener('click', ()=>{ companyListFilters().view='funil'; companyListFilters().page=1; setState({}); });
   const filterBindings={
     fCreatedFrom:'createdFrom',fCreatedTo:'createdTo',fAnalyzedFrom:'analyzedFrom',fAnalyzedTo:'analyzedTo',
     fScoreMin:'scoreMin',fScoreMax:'scoreMax',fPotencial:'potencial',fStatus:'status',fOffer:'offerId',
     fOfferType:'offerType',fSegmento:'segmento',fCidade:'cidade',fFolder:'folderId',fArchive:'archive',fSort:'sort',fPageSize:'pageSize',
   };
   document.querySelectorAll('[data-folder-view]').forEach(button=>button.addEventListener('click',()=>{
-    state.oppFilters.folderId=button.getAttribute('data-folder-view')||'todos';
-    state.oppFilters.archive=button.getAttribute('data-archive-view')||'ativas';
-    state.oppFilters.page=1; state.selectedOpps=[]; setState({});
+    companyListFilters().folderId=button.getAttribute('data-folder-view')||'todos';
+    companyListFilters().archive=button.getAttribute('data-archive-view')||'ativas';
+    companyListFilters().page=1; state.selectedOpps=[]; setState({});
   }));
   document.querySelectorAll('[data-funnel-status]').forEach(select=>select.addEventListener('change',async()=>{
     const company=state.companies.find(item=>item.id===select.getAttribute('data-funnel-status'));
@@ -2636,9 +2612,9 @@ function bindOportunidades(){
     const {data,error}=await sb.from('opportunity_folders').insert({user_id:state.userId,nome:name}).select('*').single();
     if(error){ toast(error.code==='23505'?'Já existe uma pasta com esse nome.':'Não foi possível criar a pasta.'); return; }
     state.folders.unshift({id:data.id,nome:data.nome,cor:data.cor||'#10a37f'});
-    state.oppFilters.folderId=data.id; state.oppFilters.archive='ativas'; state.oppFilters.page=1; setState({});
+    companyListFilters().folderId=data.id; companyListFilters().archive='ativas'; companyListFilters().page=1; setState({});
   });
-  const activeFolder=state.folders.find(folder=>folder.id===state.oppFilters.folderId);
+  const activeFolder=state.folders.find(folder=>folder.id===companyListFilters().folderId);
   document.querySelectorAll('[data-rename-folder]').forEach(renameFolder=>renameFolder.addEventListener('click',async()=>{
     const activeFolder=state.folders.find(folder=>folder.id===renameFolder.dataset.renameFolder);
     if(state.readOnly||!activeFolder)return;
@@ -2656,15 +2632,15 @@ function bindOportunidades(){
     if(error){ toast('Não foi possível excluir a pasta.'); return; }
     state.folders=state.folders.filter(folder=>folder.id!==activeFolder.id);
     state.companies.forEach(company=>{ company.folderIds=(company.folderIds||[]).filter(id=>id!==activeFolder.id); });
-    if(state.oppFilters.folderId===activeFolder.id)state.oppFilters.folderId='todos'; state.oppFilters.page=1; setState({}); toast('Pasta excluída; as empresas foram preservadas.');
+    if(companyListFilters().folderId===activeFolder.id)companyListFilters().folderId='todos'; companyListFilters().page=1; setState({}); toast('Pasta excluída; as empresas foram preservadas.');
   }));
   const sort=document.getElementById('fSort');
-  if(sort) sort.addEventListener('change',()=>{ state.oppFilters.sort=sort.value; state.oppFilters.page=1; setState({}); });
+  if(sort) sort.addEventListener('change',()=>{ companyListFilters().sort=sort.value; companyListFilters().page=1; setState({}); });
   const search=document.getElementById('fSearch');
   if(search) search.addEventListener('keydown',event=>{
-    if(event.key==='Enter'){ state.oppFilters.search=search.value.trim(); state.oppFilters.page=1; setState({}); }
+    if(event.key==='Enter'){ companyListFilters().search=search.value.trim(); companyListFilters().page=1; setState({}); }
   });
-  if(search) search.addEventListener('change',()=>{ state.oppFilters.search=search.value.trim(); state.oppFilters.page=1; setState({}); });
+  if(search) search.addEventListener('change',()=>{ companyListFilters().search=search.value.trim(); companyListFilters().page=1; setState({}); });
   const openFilters=document.getElementById('openOppFilters');
   if(openFilters) openFilters.addEventListener('click',()=>setState({oppFilterOpen:true}));
   ['closeOppFilters','closeOppFiltersButton'].forEach(id=>{
@@ -2674,9 +2650,9 @@ function bindOportunidades(){
   if(applyFilters) applyFilters.addEventListener('click',()=>{
     Object.entries(filterBindings).forEach(([id,key])=>{
       if(key==='sort') return;
-      const input=document.getElementById(id); if(input) state.oppFilters[key]=input.value;
+      const input=document.getElementById(id); if(input) companyListFilters()[key]=input.value;
     });
-    state.oppFilters.page=1; state.oppFilterOpen=false; setState({});
+    companyListFilters().page=1; state.oppFilterOpen=false; setState({});
   });
   const clear=document.getElementById('clearOppFilters');
   if(clear) clear.addEventListener('click',()=>{ resetOpportunityFilters(); setState({}); });
@@ -2684,10 +2660,10 @@ function bindOportunidades(){
   if(clearDrawer) clearDrawer.addEventListener('click',()=>{ resetOpportunityFilters(); state.oppFilterOpen=false; setState({}); });
   document.querySelectorAll('[data-clear-filter]').forEach(button=>button.addEventListener('click',()=>{
     const key=button.getAttribute('data-clear-filter');
-    state.oppFilters[key]=DEFAULT_OPP_FILTERS[key]; state.oppFilters.page=1; setState({});
+    companyListFilters()[key]=DEFAULT_OPP_FILTERS[key]; companyListFilters().page=1; setState({});
   }));
   document.querySelectorAll('[data-page]').forEach(button=>button.addEventListener('click',()=>{
-    if(button.disabled) return; state.oppFilters.page=Number(button.getAttribute('data-page'))||1; setState({});
+    if(button.disabled) return; companyListFilters().page=Number(button.getAttribute('data-page'))||1; setState({});
   }));
   document.querySelectorAll('.selOpp').forEach(cb=>{
     cb.addEventListener('change', ()=>{
@@ -2753,7 +2729,7 @@ function bindOportunidades(){
   const archive=document.getElementById('bulkArchive');
   if(archive) archive.addEventListener('click',async()=>{
     const ids=state.selectedOpps.slice();
-    const restoring=state.oppFilters.archive==='arquivadas';
+    const restoring=companyListFilters().archive==='arquivadas';
     const archivedAt=restoring?null:new Date().toISOString();
     const {error}=await sb.from('empresas').update({archived_at:archivedAt}).eq('user_id',state.userId).in('id',ids);
     if(error){ toast('Não foi possível '+(restoring?'desarquivar':'arquivar')+' as empresas.'); return; }

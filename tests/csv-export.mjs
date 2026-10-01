@@ -11,6 +11,7 @@ state.companies[1].site='=HYPERLINK("https://bad.invalid")';
 let filtered=state.companies.slice(0,30),blob,download,clicked=0,removed=0,revoked=0;
 const messages=[],timers=[],picker={open:true};
 const scope=vm.createContext({state,Blob,Set,Date,opportunityDataset:()=>filtered,toast:m=>messages.push(m),URL:{createObjectURL:b=>{blob=b;return 'blob:test'},revokeObjectURL:()=>revoked++},setTimeout:fn=>timers.push(fn),document:{addEventListener(){},getElementById:()=>picker,body:{appendChild:a=>download=a},createElement:()=>({click:()=>clicked++,remove:()=>removed++})}});
+scope.companyListBase=()=>state.companies;
 vm.runInContext(format+functions,scope);
 assert.equal(scope.opportunityExportRows('filtered').length,30,'All filtered rows, not just a 20-row page');
 assert.deepEqual(Array.from(scope.opportunityExportRows('selected'),c=>c.id),['c1','c35'],'Selection can include other pages/filters; stale IDs omitted, duplicates removed');

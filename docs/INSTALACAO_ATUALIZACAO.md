@@ -84,6 +84,10 @@ Convites expiram em sete dias. Revogar convite impede aceitação; Remover acess
 
 ## 5. Organização e histórico
 
+- Oportunidades, Diagnósticos e Empresas monitoradas compartilham busca, pastas, filtros, Tabela/Cards/Funil e exportação CSV das selecionadas ou dos resultados filtrados. Cada tela mantém seus próprios filtros, página e visualização no navegador; voltar do detalhe preserva a lista de origem.
+- Os contadores e exportações respeitam a tela: Monitoradas inclui somente empresas acompanhadas; Diagnósticos inclui cadastros com score e data de análise disponíveis. Seleções são limpas ao trocar de tela para evitar ações em outra lista.
+- Não há alertas simulados nem verificação automática nesta atualização. Monitoramento organiza empresas de interesse; reanalisar continua sendo uma ação manual. Esta alteração de interface não exige SQL ou publicação de funções e não inicia consumo externo.
+
 - “Todas” continua mostrando toda a carteira ativa; “Sem pasta” mostra apenas registros ainda não organizados.
 - Novas coletas não alteram status, mensagens, resultado, arquivamento, monitoramento, pastas ou data original de criação. Dados públicos ausentes não apagam os campos de contato já existentes.
 - CNPJ, telefone, domínio e endereço continuam sendo sinais de revisão, não critérios de mesclagem automática. A coleta bloqueia repetição pelo identificador da origem ou Google e mantém um cadastro estável sob concorrência. Identificadores inteiramente diferentes ainda podem representar a mesma empresa e exigem revisão.

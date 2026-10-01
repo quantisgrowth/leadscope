@@ -7,6 +7,7 @@ const helper=script.slice(script.indexOf('function folderCompanyCount('),script.
 const state={userId:'account',authUserId:'member',readOnly:false,oppFilters:{folderId:'f1',archive:'ativas'},folders:Array.from({length:40},(_,i)=>({id:'f'+i,nome:i===1?'Guindastes':'Pasta '+i,cor:'#10a37f'})),companies:[]};
 const saved=new Map();
 const scope=vm.createContext({state,localStorage:{getItem:k=>saved.get(k)||null,setItem:(k,v)=>saved.set(k,v)},document:{addEventListener(){}},esc:value=>String(value||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),activeCompanies:()=>state.companies,icon:()=>''});
+Object.assign(scope,{companyListScope:()=>'oportunidades',companyListFilters:()=>state.oppFilters,companyListBase:()=>state.companies});
 vm.runInContext(helper,scope);
 const picker=scope.renderFolderPicker(state.folders[1]);
 assert.ok(picker.includes('id="folderMenuSearch"'));assert.ok(picker.includes('Guindastes'));
