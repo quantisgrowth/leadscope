@@ -54,6 +54,8 @@ jobs:
           for function_name in search-places search-google-places reanalyze-opportunities audit-site validate-cnpj team-invitations; do
             supabase functions deploy "$function_name" --project-ref nlzlbrfwaloyxksaevne
           done
+      - name: Conferir inicialização e comunicação com o navegador
+        run: node tests/deployment-smoke.mjs
       - name: Registrar resultado
         run: |
           echo "As seis funções foram publicadas a partir do commit $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"

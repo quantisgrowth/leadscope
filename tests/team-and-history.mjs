@@ -4,6 +4,8 @@ import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 import { webcrypto } from 'node:crypto';
 const root=new URL('../',import.meta.url),read=p=>fs.readFileSync(new URL(p,root),'utf8');
+const imports=JSON.parse(read('supabase/functions/team-invitations/deno.json')).imports;
+assert.equal(imports['@supabase/supabase-js'],'npm:@supabase/supabase-js@2.117.2','The server wrapper requires a Supabase client exposing the /cors module.');
 const ts=read('supabase/functions/team-invitations/index.ts').replace(/^import .+;\n/gm,'');
 const envVars={SUPABASE_SERVICE_ROLE_KEY:'FAKE_TEST_SECRET',SUPABASE_URL:'https://test.invalid'};
 let sent=0,lastEmail,acceptedArgs,lastInsert,lastUpdate,oldInvitation,claimLost=false,hourlyCount=0,rpcError=null;
