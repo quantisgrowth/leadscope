@@ -346,6 +346,10 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch){
     servicoRecomendado: (offerMatch&&offerMatch.offer&&offerMatch.offer.nome)||row.servico_recomendado,
     offerRecommendation:offerMatch||null,
     status: row.status,
+    createdAt: row.created_at || null,
+    analyzedAt: row.analisado_em || row.coletado_em || row.created_at || null,
+    createdDate: row.created_at ? fmtDate(new Date(row.created_at)) : '',
+    analysisDate: (row.analisado_em || row.coletado_em || row.created_at) ? fmtDate(new Date(row.analisado_em || row.coletado_em || row.created_at)) : '',
     ultimaAtualizacao: row.ultima_atualizacao ? fmtDate(new Date(row.ultima_atualizacao+'T00:00:00')) : '',
     resultado: row.resultado,
     monitorada: !!row.monitorada,
@@ -423,15 +427,23 @@ function msgTemplates(c){
 // Dados de negócio (empresas, onboarding, perfil) vêm sempre do Supabase — nunca do localStorage.
 // Só preferências puramente visuais (aba aberta, filtro selecionado, menu mobile) ficam salvas
 // localmente, por conveniência, e nunca substituem o que está no banco.
+const DEFAULT_OPP_FILTERS = {
+  search:'', createdFrom:'', createdTo:'', analyzedFrom:'', analyzedTo:'',
+  scoreMin:'', scoreMax:'', potencial:'todos', offerId:'todos', offerType:'todos',
+  status:'todos', segmento:'todos', cidade:'todos', sort:'score_desc', page:1, pageSize:20, view:'tabela',
+};
 const DEFAULT_UI_PREFS = {
   route:'#/overview', sidebarOpen:false,
   diagTone:'consultivo', detailTab:'perfil', configTab:'perfil',
-  oppFilters:{potencial:'todos', status:'todos', view:'tabela'},
+  diagReturnRoute:'#/oportunidades', oppFilters:DEFAULT_OPP_FILTERS,
 };
 function loadUiPrefs(){
   try{
     const raw = localStorage.getItem('leadscope_ui_prefs_v1');
-    if(raw) return Object.assign({}, DEFAULT_UI_PREFS, JSON.parse(raw));
+    if(raw){
+      const parsed=JSON.parse(raw);
+      return Object.assign({}, DEFAULT_UI_PREFS, parsed, {oppFilters:Object.assign({}, DEFAULT_OPP_FILTERS, parsed.oppFilters||{})});
+    }
   }catch(e){}
   return JSON.parse(JSON.stringify(DEFAULT_UI_PREFS));
 }
@@ -439,7 +451,7 @@ function saveUiPrefs(){
   try{
     localStorage.setItem('leadscope_ui_prefs_v1', JSON.stringify({
       route: state.route, sidebarOpen: state.sidebarOpen, diagTone: state.diagTone,
-      detailTab: state.detailTab, configTab: state.configTab, oppFilters: state.oppFilters,
+      detailTab: state.detailTab, configTab: state.configTab, diagReturnRoute:state.diagReturnRoute, oppFilters: state.oppFilters,
     }));
   }catch(e){}
 }
@@ -1270,19 +1282,68 @@ function bindRadarProcessing(){
 }
 
 /* ================= OPORTUNIDADES ================= */
+function dateKey(value){ return value ? String(value).slice(0,10) : ''; }
+function normalizedText(value){ return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+function companyOffer(c){
+  if(c.offerRecommendation&&c.offerRecommendation.offer) return c.offerRecommendation.offer;
+  return state.offers.find(offer=>offer.nome===c.servicoRecomendado)||null;
+}
+function opportunityDataset(){
+  const f=state.oppFilters;
+  let list=state.companies.slice();
+  const query=normalizedText(f.search);
+  if(query) list=list.filter(c=>normalizedText([c.nome,c.segmento,companyLocation(c),c.servicoRecomendado].join(' ')).includes(query));
+  if(f.potencial!=='todos') list=list.filter(c=>c.potencial===f.potencial);
+  if(f.status!=='todos') list=list.filter(c=>c.status===f.status);
+  if(f.segmento!=='todos') list=list.filter(c=>c.segmento===f.segmento);
+  if(f.cidade!=='todos') list=list.filter(c=>(c.cidade||companyLocation(c))===f.cidade);
+  if(f.offerId!=='todos') list=list.filter(c=>{ const offer=companyOffer(c); return offer&&offer.id===f.offerId; });
+  if(f.offerType!=='todos') list=list.filter(c=>{ const offer=companyOffer(c); return offer&&offer.tipo===f.offerType; });
+  if(f.scoreMin!=='') list=list.filter(c=>Number(c.score)>=Number(f.scoreMin));
+  if(f.scoreMax!=='') list=list.filter(c=>Number(c.score)<=Number(f.scoreMax));
+  if(f.createdFrom) list=list.filter(c=>dateKey(c.createdAt)>=f.createdFrom);
+  if(f.createdTo) list=list.filter(c=>dateKey(c.createdAt)<=f.createdTo);
+  if(f.analyzedFrom) list=list.filter(c=>dateKey(c.analyzedAt)>=f.analyzedFrom);
+  if(f.analyzedTo) list=list.filter(c=>dateKey(c.analyzedAt)<=f.analyzedTo);
+  const sorters={
+    score_desc:(a,b)=>Number(b.score)-Number(a.score), score_asc:(a,b)=>Number(a.score)-Number(b.score),
+    created_desc:(a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')),
+    analyzed_desc:(a,b)=>String(b.analyzedAt||'').localeCompare(String(a.analyzedAt||'')),
+    name_asc:(a,b)=>String(a.nome||'').localeCompare(String(b.nome||''),'pt-BR'),
+  };
+  list.sort(sorters[f.sort]||sorters.score_desc);
+  return list;
+}
+function opportunityFilterChips(f){
+  const offer=state.offers.find(item=>item.id===f.offerId);
+  const typeLabel=OFFER_TYPES[f.offerType];
+  const values=[
+    ['search',f.search&&`Busca: ${f.search}`], ['createdFrom',f.createdFrom&&`Criada desde ${f.createdFrom.split('-').reverse().join('/')}`],
+    ['createdTo',f.createdTo&&`Criada até ${f.createdTo.split('-').reverse().join('/')}`], ['analyzedFrom',f.analyzedFrom&&`Analisada desde ${f.analyzedFrom.split('-').reverse().join('/')}`],
+    ['analyzedTo',f.analyzedTo&&`Analisada até ${f.analyzedTo.split('-').reverse().join('/')}`], ['scoreMin',f.scoreMin!==''&&`Score mínimo ${f.scoreMin}`],
+    ['scoreMax',f.scoreMax!==''&&`Score máximo ${f.scoreMax}`], ['potencial',f.potencial!=='todos'&&`Potencial: ${f.potencial}`],
+    ['offerId',offer&&`Produto: ${offer.nome}`], ['offerType',typeLabel&&`Tipo: ${typeLabel}`], ['status',f.status!=='todos'&&`Status: ${f.status}`],
+    ['segmento',f.segmento!=='todos'&&`Segmento: ${f.segmento}`], ['cidade',f.cidade!=='todos'&&`Local: ${f.cidade}`],
+  ];
+  return values.filter(item=>item[1]);
+}
 function renderOportunidades(){
   const f = state.oppFilters;
-  let list = state.companies.slice();
-  if(f.potencial!=='todos') list = list.filter(c=>c.potencial===f.potencial);
-  if(f.status!=='todos') list = list.filter(c=>c.status===f.status);
-  list.sort((a,b)=>b.score-a.score);
-  const statusOptions = [...new Set(state.companies.map(c=>c.status))];
+  const list=opportunityDataset();
+  const statusOptions=[...new Set(state.companies.map(c=>c.status).filter(Boolean))].sort();
+  const segments=[...new Set(state.companies.map(c=>c.segmento).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  const cities=[...new Set(state.companies.map(c=>c.cidade||companyLocation(c)).filter(value=>value&&value!=='Não informado'))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  const pageSize=Math.max(1,Number(f.pageSize)||20);
+  const pages=Math.max(1,Math.ceil(list.length/pageSize));
+  f.page=Math.min(Math.max(1,Number(f.page)||1),pages);
+  const start=(f.page-1)*pageSize, visible=list.slice(start,start+pageSize);
+  const chips=opportunityFilterChips(f);
 
   return `
   <div class="row between wrap" style="margin-bottom:4px;">
     <div>
       <h1 class="page-title">Oportunidades</h1>
-      <p class="page-sub">${list.length} empresas · ordenadas por maior potencial comercial</p>
+      <p class="page-sub">${list.length} de ${state.companies.length} empresas · página ${f.page} de ${pages}</p>
     </div>
     <div class="row gap-8">
       <button class="btn btn-sm ${f.view==='tabela'?'btn-primary':''}" id="viewTabela">Tabela</button>
@@ -1292,10 +1353,17 @@ function renderOportunidades(){
   </div>
 
   <div class="card" style="margin-bottom:16px;">
-    <div class="row gap-12 wrap">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;align-items:end;">
+      <div style="grid-column:span 2;"><label class="label">Buscar nesta lista</label><input class="input" id="fSearch" value="${esc(f.search)}" placeholder="Empresa, segmento, cidade ou produto"></div>
+      <div><label class="label">Criada de</label><input class="input" type="date" id="fCreatedFrom" value="${esc(f.createdFrom)}"></div>
+      <div><label class="label">Criada até</label><input class="input" type="date" id="fCreatedTo" value="${esc(f.createdTo)}"></div>
+      <div><label class="label">Analisada de</label><input class="input" type="date" id="fAnalyzedFrom" value="${esc(f.analyzedFrom)}"></div>
+      <div><label class="label">Analisada até</label><input class="input" type="date" id="fAnalyzedTo" value="${esc(f.analyzedTo)}"></div>
+      <div><label class="label">Score mínimo</label><input class="input" type="number" min="0" max="100" id="fScoreMin" value="${esc(f.scoreMin)}" placeholder="0"></div>
+      <div><label class="label">Score máximo</label><input class="input" type="number" min="0" max="100" id="fScoreMax" value="${esc(f.scoreMax)}" placeholder="100"></div>
       <div>
         <label class="label">Potencial</label>
-        <select class="input" id="fPotencial" style="min-width:150px;">
+        <select class="input" id="fPotencial">
           <option value="todos" ${f.potencial==='todos'?'selected':''}>Todos</option>
           <option value="alto" ${f.potencial==='alto'?'selected':''}>Alto</option>
           <option value="medio" ${f.potencial==='medio'?'selected':''}>Médio</option>
@@ -1304,12 +1372,18 @@ function renderOportunidades(){
       </div>
       <div>
         <label class="label">Status</label>
-        <select class="input" id="fStatus" style="min-width:170px;">
+        <select class="input" id="fStatus">
           <option value="todos" ${f.status==='todos'?'selected':''}>Todos</option>
-          ${statusOptions.map(s=>`<option value="${s}" ${f.status===s?'selected':''}>${s}</option>`).join('')}
+          ${statusOptions.map(s=>`<option value="${esc(s)}" ${f.status===s?'selected':''}>${esc(s)}</option>`).join('')}
         </select>
       </div>
-      <div style="flex:1"></div>
+      <div><label class="label">Produto recomendado</label><select class="input" id="fOffer"><option value="todos">Todos</option>${state.offers.filter(o=>o.ativo).map(o=>`<option value="${o.id}" ${f.offerId===o.id?'selected':''}>${esc(o.nome)}</option>`).join('')}</select></div>
+      <div><label class="label">Tipo de oferta</label><select class="input" id="fOfferType"><option value="todos">Todos</option>${Object.entries(OFFER_TYPES).map(([key,label])=>`<option value="${key}" ${f.offerType===key?'selected':''}>${label}</option>`).join('')}</select></div>
+      <div><label class="label">Segmento</label><select class="input" id="fSegmento"><option value="todos">Todos</option>${segments.map(s=>`<option value="${esc(s)}" ${f.segmento===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
+      <div><label class="label">Cidade ou região</label><select class="input" id="fCidade"><option value="todos">Todas</option>${cities.map(s=>`<option value="${esc(s)}" ${f.cidade===s?'selected':''}>${esc(s)}</option>`).join('')}</select></div>
+      <div><label class="label">Ordenar</label><select class="input" id="fSort"><option value="score_desc" ${f.sort==='score_desc'?'selected':''}>Maior score</option><option value="score_asc" ${f.sort==='score_asc'?'selected':''}>Menor score</option><option value="created_desc" ${f.sort==='created_desc'?'selected':''}>Criação mais recente</option><option value="analyzed_desc" ${f.sort==='analyzed_desc'?'selected':''}>Análise mais recente</option><option value="name_asc" ${f.sort==='name_asc'?'selected':''}>Nome A–Z</option></select></div>
+      <div><label class="label">Por página</label><select class="input" id="fPageSize">${[10,20,50].map(n=>`<option value="${n}" ${Number(f.pageSize)===n?'selected':''}>${n} empresas</option>`).join('')}</select></div>
+      <button class="btn btn-sm" id="clearOppFilters">Limpar filtros</button>
       ${state.selectedOpps.length ? `
         <div class="row gap-8" style="align-items:flex-end;">
           <span class="badge badge-blue" style="align-self:center;">${state.selectedOpps.length} selecionadas</span>
@@ -1317,9 +1391,11 @@ function renderOportunidades(){
           <button class="btn btn-sm" id="bulkStatus">Marcar como Priorizada</button>
         </div>` : ''}
     </div>
+    ${chips.length?`<div class="row gap-8 wrap" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">${chips.map(([key,label])=>`<button class="badge badge-blue" data-clear-filter="${key}" style="border:0;cursor:pointer;">${esc(label)} ×</button>`).join('')}</div>`:''}
   </div>
 
-  ${f.view==='cards' ? renderOppCards(list) : renderOppTable(list)}
+  ${f.view==='cards' ? renderOppCards(visible) : renderOppTable(visible)}
+  ${list.length?`<div class="row between wrap" style="margin-top:14px;"><span class="muted">Exibindo ${start+1}–${Math.min(start+pageSize,list.length)} de ${list.length}</span><div class="row gap-8"><button class="btn btn-sm" data-page="${f.page-1}" ${f.page<=1?'disabled':''}>Anterior</button><span class="badge badge-gray">${f.page} / ${pages}</span><button class="btn btn-sm" data-page="${f.page+1}" ${f.page>=pages?'disabled':''}>Próxima</button></div></div>`:''}
   `;
 }
 function statusColor(status){
@@ -1352,7 +1428,7 @@ function renderOppTable(list){
           <td class="muted" style="max-width:200px;">${c.servicoRecomendado}</td>
           <td class="muted">${c.confianca}</td>
           <td><span class="badge ${statusColor(c.status)}">${c.status}</span></td>
-          <td class="muted">${c.ultimaAtualizacao}</td>
+          <td class="muted">${c.analysisDate||'Não analisada'}<div style="font-size:11px;margin-top:3px;">Criada: ${c.createdDate||'—'}</div></td>
           <td><button class="btn btn-sm" data-diag="${c.id}">Ver</button></td>
         </tr>`).join('')}
       </tbody>
@@ -1366,12 +1442,13 @@ function renderOppCards(list){
     ${list.map(c=>`
       <div class="card">
         <div class="row between" style="margin-bottom:8px;">
-          <span class="badge ${c.potencial==='alto'?'badge-blue':c.potencial==='medio'?'badge-warn':'badge-gray'}">${c.potencial==='alto'?'Alto potencial':c.potencial==='medio'?'Potencial médio':'Baixa prioridade'}</span>
+          <div class="row gap-8"><input type="checkbox" class="selOpp" data-id="${c.id}" ${state.selectedOpps.includes(c.id)?'checked':''}><span class="badge ${c.potencial==='alto'?'badge-blue':c.potencial==='medio'?'badge-warn':'badge-gray'}">${c.potencial==='alto'?'Alto potencial':c.potencial==='medio'?'Potencial médio':'Baixa prioridade'}</span></div>
           <span style="font-weight:800;color:${classificacao(c.score).color};font-family:Manrope;">${c.score}</span>
         </div>
         <div style="font-weight:700;font-size:14.5px;">${c.nome}</div>
         <div class="muted" style="font-size:12.5px;margin-bottom:10px;">${c.segmento} · ${companyLocation(c)}</div>
-        <div class="muted" style="font-size:12.5px;margin-bottom:12px;">${c.sinais[0].texto}</div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:8px;">${c.sinais[0].texto}</div>
+        <div class="muted" style="font-size:11.5px;margin-bottom:12px;">Análise: ${c.analysisDate||'não realizada'} · Criação: ${c.createdDate||'—'}</div>
         <div class="row between">
           <span class="badge ${statusColor(c.status)}">${c.status}</span>
           <button class="btn btn-sm" data-diag="${c.id}">Ver diagnóstico</button>
@@ -1421,7 +1498,7 @@ function renderDiagnostico(){
   const nextOffer=currentStageIndex>=0?state.offers.filter(offer=>offer.ativo&&OFFER_STAGES.findIndex(stage=>stage.key===offer.etapa)>currentStageIndex).sort((a,b)=>OFFER_STAGES.findIndex(stage=>stage.key===a.etapa)-OFFER_STAGES.findIndex(stage=>stage.key===b.etapa)||a.posicao-b.posicao)[0]:null;
 
   return `
-  <button class="btn btn-sm btn-ghost" style="margin-bottom:14px;padding-left:0;" data-nav="#/oportunidades">${icon('arrow')} Voltar para oportunidades</button>
+  <button class="btn btn-sm btn-ghost" style="margin-bottom:14px;padding-left:0;" data-nav="${esc(state.diagReturnRoute||'#/oportunidades')}">${icon('arrow')} Voltar</button>
   <div class="card" style="margin-bottom:18px;">
     <div class="diag-header">
       <div style="min-width:240px;">
@@ -1961,7 +2038,12 @@ function renderConfiguracoes(){
 /* ================= EVENT BINDING PER PAGE ================= */
 function bindPageEvents(route){
   document.querySelectorAll('[data-diag]').forEach(el=>{
-    el.addEventListener('click', ()=>{ currentDiagId = el.getAttribute('data-diag'); setState({route:'#/diagnostico/'+currentDiagId}); });
+    el.addEventListener('click', ()=>{
+      currentDiagId=el.getAttribute('data-diag');
+      state.diagReturnRoute=state.route&&state.route.startsWith('#/diagnostico/')?'#/oportunidades':state.route;
+      saveUiPrefs();
+      navigate('#/diagnostico/'+currentDiagId);
+    });
   });
   if(route==='radar') bindRadarProcessing();
   if(route==='oportunidades') bindOportunidades();
@@ -1978,9 +2060,29 @@ function bindOportunidades(){
   const vt = document.getElementById('viewTabela'), vc = document.getElementById('viewCards');
   if(vt) vt.addEventListener('click', ()=>{ state.oppFilters.view='tabela'; setState({}); });
   if(vc) vc.addEventListener('click', ()=>{ state.oppFilters.view='cards'; setState({}); });
-  const fp = document.getElementById('fPotencial'), fs = document.getElementById('fStatus');
-  if(fp) fp.addEventListener('change', ()=>{ state.oppFilters.potencial=fp.value; setState({}); });
-  if(fs) fs.addEventListener('change', ()=>{ state.oppFilters.status=fs.value; setState({}); });
+  const filterBindings={
+    fCreatedFrom:'createdFrom',fCreatedTo:'createdTo',fAnalyzedFrom:'analyzedFrom',fAnalyzedTo:'analyzedTo',
+    fScoreMin:'scoreMin',fScoreMax:'scoreMax',fPotencial:'potencial',fStatus:'status',fOffer:'offerId',
+    fOfferType:'offerType',fSegmento:'segmento',fCidade:'cidade',fSort:'sort',fPageSize:'pageSize',
+  };
+  Object.entries(filterBindings).forEach(([id,key])=>{
+    const input=document.getElementById(id);
+    if(input) input.addEventListener('change',()=>{ state.oppFilters[key]=input.value; state.oppFilters.page=1; setState({}); });
+  });
+  const search=document.getElementById('fSearch');
+  if(search) search.addEventListener('keydown',event=>{
+    if(event.key==='Enter'){ state.oppFilters.search=search.value.trim(); state.oppFilters.page=1; setState({}); }
+  });
+  if(search) search.addEventListener('change',()=>{ state.oppFilters.search=search.value.trim(); state.oppFilters.page=1; setState({}); });
+  const clear=document.getElementById('clearOppFilters');
+  if(clear) clear.addEventListener('click',()=>{ state.oppFilters=JSON.parse(JSON.stringify(DEFAULT_OPP_FILTERS)); state.selectedOpps=[]; setState({}); });
+  document.querySelectorAll('[data-clear-filter]').forEach(button=>button.addEventListener('click',()=>{
+    const key=button.getAttribute('data-clear-filter');
+    state.oppFilters[key]=DEFAULT_OPP_FILTERS[key]; state.oppFilters.page=1; setState({});
+  }));
+  document.querySelectorAll('[data-page]').forEach(button=>button.addEventListener('click',()=>{
+    if(button.disabled) return; state.oppFilters.page=Number(button.getAttribute('data-page'))||1; setState({});
+  }));
   document.querySelectorAll('.selOpp').forEach(cb=>{
     cb.addEventListener('change', ()=>{
       const id = cb.getAttribute('data-id');
@@ -1988,8 +2090,20 @@ function bindOportunidades(){
       render();
     });
   });
+  const selAll=document.getElementById('selAll');
+  if(selAll){
+    const visibleIds=[...document.querySelectorAll('.selOpp')].map(cb=>cb.getAttribute('data-id'));
+    const selectedCount=visibleIds.filter(id=>state.selectedOpps.includes(id)).length;
+    selAll.checked=visibleIds.length>0&&selectedCount===visibleIds.length;
+    selAll.indeterminate=selectedCount>0&&selectedCount<visibleIds.length;
+    selAll.addEventListener('change',()=>{
+      if(selAll.checked) state.selectedOpps=[...new Set([...state.selectedOpps,...visibleIds])];
+      else state.selectedOpps=state.selectedOpps.filter(id=>!visibleIds.includes(id));
+      setState({});
+    });
+  }
   const exp = document.getElementById('exportCsv');
-  if(exp) exp.addEventListener('click', ()=>{ flashButton(exp, 'Exportado'); toast('Exportação CSV simulada — '+state.companies.length+' linhas.'); });
+  if(exp) exp.addEventListener('click', ()=>{ flashButton(exp, 'Exportado'); toast('Exportação CSV simulada — '+opportunityDataset().length+' linhas filtradas.'); });
   const bm = document.getElementById('bulkMonitor');
   if(bm) bm.addEventListener('click', async ()=>{
     const ids = state.selectedOpps.slice();

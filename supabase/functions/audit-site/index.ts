@@ -234,6 +234,10 @@ export default {
         checks, evidence, metrics, score, confidence: "Média", error: null, finished_at: finishedAt,
       }).eq("id", auditId).select("*").single();
       if (saveError) throw saveError;
+      const { error: companyUpdateError } = await ctx.supabase.from("empresas").update({
+        analisado_em: finishedAt, ultima_atualizacao: finishedAt.slice(0, 10),
+      }).eq("id", audit.empresa_id).eq("user_id", userId);
+      if (companyUpdateError) throw companyUpdateError;
       return Response.json({ status: "concluido", audit: saved });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Falha inesperada ao auditar o site.";

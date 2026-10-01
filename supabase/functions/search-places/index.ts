@@ -164,6 +164,7 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
       latitude: place.location?.lat ?? null,
       longitude: place.location?.lng ?? null,
       coletado_em: collectedAt,
+      analisado_em: collectedAt,
     }, { onConflict: "user_id,source_provider,source_place_id" }).select("id,nome,score,potencial").single();
     if (companyError) throw companyError;
 

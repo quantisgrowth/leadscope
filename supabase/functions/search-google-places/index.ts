@@ -106,7 +106,7 @@ export default {
           servico_recomendado: place.websiteUri ? "Otimização da presença digital e conversão" : "Criação de site e presença digital",
           sinais_keys: signals, business_status: place.businessStatus ?? null, google_maps_url: place.googleMapsUri ?? null,
           latitude: place.location?.latitude ?? null, longitude: place.location?.longitude ?? null,
-          dados_google: place, coletado_em: new Date().toISOString(),
+          dados_google: place, coletado_em: new Date().toISOString(), analisado_em: new Date().toISOString(),
         }, { onConflict: "user_id,google_place_id" }).select("id,nome,score,potencial").single();
         if (companyError) throw companyError;
 
