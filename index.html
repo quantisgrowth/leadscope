@@ -334,6 +334,40 @@ function formatOpeningHours(sourcePayload){
 // das chaves salvas no banco (empresas.sinais_keys), evitando duplicar esses textos no schema SQL.
 function sinaisFromKeys(keys){ return (keys||[]).map(k=>SIGNAL_POOL.find(s=>s.key===k)).filter(Boolean); }
 
+function offerIsDigital(offer){
+  return /site|marketing|presen[cç]a digital|seo|rede social|whatsapp|landing page|tr[aá]fego/i.test([offer&&offer.nome,offer&&offer.resultado,offer&&offer.descricao].filter(Boolean).join(' '));
+}
+
+function contextualSignals(rawSignals, offer){
+  const neutralized=rawSignals.map(signal=>{
+    if(signal.key==='semSite') return Object.assign({},signal,{interpretacao:'O site não foi encontrado na fonte consultada. Isso limita os dados disponíveis, mas sozinho não comprova uma oportunidade comercial.'});
+    if(signal.key==='semWhats') return Object.assign({},signal,{interpretacao:'O telefone não foi encontrado na fonte consultada. Isso dificulta o contato, mas sozinho não comprova necessidade de um produto específico.'});
+    return signal;
+  });
+  if(!offer) return neutralized;
+  const fit={
+    key:'offerFit',
+    texto:`Atividade pública compatível com o público-alvo de ${offer.nome}`,
+    fonte:'Cruzamento com a oferta cadastrada',
+    interpretacao:`A empresa atua em um segmento aderente a ${offer.nome}. O próximo passo é validar em conversa se existe necessidade de ${String(offer.resultado||'do resultado proposto').replace(/[.]$/,'').toLowerCase()}.`,
+    servico:null,
+  };
+  const digital=offerIsDigital(offer);
+  const relevantSignals=new Set(offer.sinais||[]);
+  const adjusted=neutralized.map(signal=>{
+    if(signal.key==='semSite'&&!digital&&!relevantSignals.has('semSite')) return Object.assign({},signal,{interpretacao:`O site não foi encontrado na fonte consultada, mas isso não comprova uma necessidade atendida por ${offer.nome} e não é a justificativa principal da recomendação.`});
+    if(signal.key==='semWhats'&&!digital&&!relevantSignals.has('semWhats')) return Object.assign({},signal,{interpretacao:`O telefone não foi encontrado na fonte consultada. Esse dado reduz a facilidade de contato, mas não indica necessidade de ${offer.nome}.`});
+    return signal;
+  });
+  return [fit,...adjusted];
+}
+
+function recommendationReason(offer, compatibility){
+  if(!offer) return 'Oferta relacionada aos sinais públicos encontrados nesta empresa.';
+  const result=String(offer.resultado||'').replace(/[.]$/,'');
+  return `Aderência estimada em ${Number(compatibility)||0}% a partir da atividade e do público-alvo cadastrados.${result?` Resultado a validar: ${result}.`:''}`;
+}
+
 function rowToOffer(row){
   return {
     id:row.id, nome:row.nome||'', resultado:row.resultado||'', descricao:row.descricao||'',
@@ -355,9 +389,14 @@ function formatOfferPrice(offer){
 
 // Converte uma linha da tabela `empresas` (+ suas `evidencias`) no formato que as telas usam.
 function rowToCompany(row, evidenciaRows, latestAudit, offerMatch){
-  const sinais = sinaisFromKeys(row.sinais_keys);
+  const rawSignals = sinaisFromKeys(row.sinais_keys);
   const sourceLabel=row.source_provider==='google_maps'?'Google Maps via Apify':'Fonte pública';
-  if(!sinais.length) sinais.push({key:'perfilPublico', texto:'Estabelecimento localizado em uma fonte pública', fonte:sourceLabel, interpretacao:'Há dados públicos suficientes para iniciar uma qualificação comercial', servico:4});
+  if(!rawSignals.length) rawSignals.push({key:'perfilPublico', texto:'Estabelecimento localizado em uma fonte pública', fonte:sourceLabel, interpretacao:'Há dados públicos suficientes para iniciar uma qualificação comercial', servico:4});
+  const offer=offerMatch&&offerMatch.offer;
+  const sinais=contextualSignals(rawSignals,offer);
+  const contextualMatch=offerMatch?Object.assign({},offerMatch,{motivo:recommendationReason(offer,offerMatch.compatibilidade)}):null;
+  const legacyAgencyRecommendation=/cria[cç][aã]o de site|presen[cç]a digital|otimiza[cç][aã]o da presen[cç]a/i.test(row.servico_recomendado||'');
+  const recommendedOffer=(offer&&offer.nome)||(!legacyAgencyRecommendation&&row.servico_recomendado)||'Nenhuma oferta compatível definida';
   const evidencias = (evidenciaRows||[]).map(e=>({
     texto:e.texto, fonte:e.fonte,
     data: e.data ? fmtDate(new Date(e.data+'T00:00:00')) : '',
@@ -375,8 +414,8 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch){
     score:row.score, confianca:row.confianca, potencial:row.potencial,
     sinais, evidencias,
     interpretacoes:[...new Set(sinais.map(s=>s.interpretacao))].slice(0,3),
-    servicoRecomendado: (offerMatch&&offerMatch.offer&&offerMatch.offer.nome)||row.servico_recomendado,
-    offerRecommendation:offerMatch||null,
+    servicoRecomendado: recommendedOffer,
+    offerRecommendation:contextualMatch,
     status: row.status,
     createdAt: row.created_at || null,
     analyzedAt: row.analisado_em || row.coletado_em || row.created_at || null,
@@ -447,11 +486,21 @@ function onboardingToRow(ob){
 }
 
 function msgTemplates(c){
+  const offer=c.offerRecommendation&&c.offerRecommendation.offer;
+  if(offer){
+    const result=String(offer.resultado||'o resultado proposto').replace(/[.]$/,'').toLowerCase();
+    const audience=String(offer.publicoAlvo||c.segmento||'empresas deste segmento').replace(/[.]$/,'');
+    return {
+      direto:`Olá! Vi que a ${c.nome} atua em ${c.segmento}. Trabalho com o ${offer.nome}, uma solução voltada a ${audience.toLowerCase()} para ${result}. Faz sentido entender rapidamente como vocês cuidam disso hoje?`,
+      consultivo:`Olá. Ao analisar o perfil público da ${c.nome}, identifiquei aderência com o público atendido pelo ${offer.nome}. A proposta é ${result}, mas esse diagnóstico inicial não confirma uma necessidade interna. Posso te fazer duas perguntas rápidas para entender se existe encaixe?`,
+      informal:`Oi! Encontrei a ${c.nome} pesquisando empresas de ${c.segmento} e o perfil parece ter relação com quem atendemos no ${offer.nome}. Ele ajuda a ${result}. Posso te explicar em poucas linhas e você me diz se faz sentido por aí?`,
+    };
+  }
   const primeiro = c.sinais[0];
   return {
-    direto: `Olá! Analisei a presença digital da ${c.nome} e identifiquei um ponto específico que pode estar reduzindo novos contatos: ${primeiro.texto.toLowerCase()}. Posso te enviar um diagnóstico rápido com o que encontrei?`,
-    consultivo: `Olá. Ao analisar a presença digital da ${c.nome}, encontrei alguns pontos na jornada de contato que podem estar dificultando novos agendamentos, especialmente ${c.sinais.some(s=>s.key==='mobileRuim')?'pelo celular':'no site'}. Posso compartilhar um diagnóstico rápido com as oportunidades que identifiquei?`,
-    informal: `Oi! Passei pelo site e pelo perfil da ${c.nome} e reparei em um detalhe que talvez esteja passando despercebido por aí: ${primeiro.texto.toLowerCase()}. Se fizer sentido, te mando uma análise rapidinha sem compromisso :)`,
+    direto: `Olá! Analisei os dados públicos da ${c.nome} e identifiquei este ponto: ${primeiro.texto.toLowerCase()}. Posso te fazer duas perguntas rápidas para validar se existe alguma oportunidade?`,
+    consultivo: `Olá. Encontrei a ${c.nome} em uma pesquisa de empresas de ${c.segmento}. Os dados públicos permitem iniciar uma qualificação, mas ainda não comprovam uma necessidade interna. Posso te fazer duas perguntas rápidas para entender o cenário atual?`,
+    informal: `Oi! Encontrei o perfil da ${c.nome} em uma pesquisa do setor. Tenho uma hipótese de possível encaixe, mas queria validar antes de presumir qualquer necessidade. Posso te explicar rapidinho?`,
   };
 }
 
@@ -523,7 +572,7 @@ async function loadAllData(userId){
     sb.from('evidencias').select('*').order('data', {ascending:false}),
     sb.from('site_audits').select('*').eq('user_id', userId).order('created_at', {ascending:false}),
     sb.from('offers').select('*').eq('user_id', userId).order('posicao', {ascending:true}),
-    sb.from('company_offer_matches').select('*,offer:offers(id,nome,etapa,tipo,modelo_cobranca,ticket_min,ticket_max)').eq('user_id', userId).eq('principal', true).order('compatibilidade', {ascending:false}),
+    sb.from('company_offer_matches').select('*,offer:offers(*)').eq('user_id', userId).eq('principal', true).order('compatibilidade', {ascending:false}),
   ]);
   const evByEmpresa = {};
   (evidenciasRows||[]).forEach(e=>{ (evByEmpresa[e.empresa_id] = evByEmpresa[e.empresa_id]||[]).push(e); });
@@ -534,7 +583,10 @@ async function loadAllData(userId){
     latestAuditByEmpresa[empresaId]=audits.find(audit=>['pendente','processando'].includes(audit.status))||audits.find(audit=>audit.status==='concluido')||audits[0];
   });
   const matchByEmpresa={};
-  (offerMatchRows||[]).forEach(match=>{ if(!matchByEmpresa[match.empresa_id]) matchByEmpresa[match.empresa_id]=match; });
+  (offerMatchRows||[]).forEach(match=>{
+    if(match.offer) match.offer=rowToOffer(match.offer);
+    if(!matchByEmpresa[match.empresa_id]) matchByEmpresa[match.empresa_id]=match;
+  });
   const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id], latestAuditByEmpresa[row.id], matchByEmpresa[row.id]));
   const ob = rowToOnboarding(settings) || state.onboarding;
   setState({
@@ -1562,10 +1614,10 @@ function renderDiagnostico(){
           <div class="card-title" style="font-size:13.5px;color:var(--blue-light);">Encontramos</div>
           ${c.evidencias.map(e=>`
             <div class="evidence-item">
-              <div style="font-size:13.5px;">${e.texto}</div>
+              <div style="font-size:13.5px;">${esc(e.texto)}</div>
               <div class="evidence-meta">
-                <span>${icon('doc')} ${e.fonte}</span>
-                <span>${e.data}</span>
+                <span>${icon('doc')} ${esc(e.fonte)}</span>
+                <span>${esc(e.data)}</span>
                 <span class="badge ${e.confianca==='Alta'?'badge-blue':e.confianca==='Média'?'badge-warn':'badge-gray'}" style="padding:1px 8px;">${e.confianca}</span>
                 <a href="#" style="color:var(--blue-light);text-decoration:none;">Ver evidência →</a>
               </div>
@@ -1573,13 +1625,13 @@ function renderDiagnostico(){
         </div>
         <div>
           <div class="card-title" style="font-size:13.5px;color:var(--warn);">Isso pode indicar</div>
-          ${c.interpretacoes.map(t=>`<div class="evidence-item" style="background:transparent;">${t}</div>`).join('')}
+          ${c.interpretacoes.map(t=>`<div class="evidence-item" style="background:transparent;">${esc(t)}</div>`).join('')}
           <div class="divider"></div>
-          <div class="card-title" style="font-size:13.5px;color:var(--blue-light);">Recomendamos</div>
+          <div class="card-title" style="font-size:13.5px;color:var(--blue-light);">Oferta com possível encaixe</div>
           <div class="evidence-item">
-            <div style="font-weight:700;font-size:13.5px;margin-bottom:4px;">${c.servicoRecomendado}</div>
-            <div class="muted" style="font-size:12.5px;margin-bottom:6px;">Prioridade: <b style="color:var(--text)">${c.potencial==='alto'?'Alta':c.potencial==='medio'?'Média':'Baixa'}</b></div>
-            <div style="font-size:13px;">${esc((c.offerRecommendation&&c.offerRecommendation.motivo)||'Oferta relacionada aos sinais públicos encontrados nesta empresa.')}</div>
+            ${c.offerRecommendation?`<div style="font-weight:700;font-size:13.5px;margin-bottom:4px;">${esc(c.servicoRecomendado)}</div>
+            <div class="muted" style="font-size:12.5px;margin-bottom:6px;">Prioridade comercial: <b style="color:var(--text)">${c.potencial==='alto'?'Alta':c.potencial==='medio'?'Média':'Baixa'}</b></div>
+            <div style="font-size:13px;">${esc(c.offerRecommendation.motivo)}</div>`:`<div style="font-weight:700;font-size:13.5px;margin-bottom:5px;">Nenhuma oferta compatível definida</div><div class="muted" style="font-size:12.5px;">Os dados públicos não devem ser transformados em uma recomendação sem aderência ao produto e ao público-alvo cadastrados.</div>`}
           </div>
         </div>
       </div>
@@ -1592,7 +1644,7 @@ function renderDiagnostico(){
     <div class="tone-tabs">
       ${['direto','consultivo','informal'].map(t=>`<span class="pill ${tone===t?'active':''}" data-tone="${t}">${t==='direto'?'Direto':t==='consultivo'?'Consultivo':'Informal profissional'}</span>`).join('')}
     </div>
-    <div class="message-box" id="msgBox" contenteditable="true">${msgs[tone]}</div>
+    <div class="message-box" id="msgBox" contenteditable="true">${esc(msgs[tone])}</div>
     <div class="row gap-8" style="margin-top:12px;">
       <button class="btn btn-sm" id="copyMsg">${icon('copy')} Copiar mensagem</button>
       <button class="btn btn-sm" id="regenMsg">${icon('zap')} Gerar outra versão</button>

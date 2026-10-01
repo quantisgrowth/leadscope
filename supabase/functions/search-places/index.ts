@@ -31,6 +31,10 @@ type ApifyPlace = {
 type Offer = {
   id: string;
   nome: string;
+  resultado: string;
+  descricao: string;
+  publico_alvo: string;
+  tipo: string;
   etapa: string;
   categorias: string[];
   sinais: string[];
@@ -45,20 +49,36 @@ function normalizeText(value: unknown) {
   return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
 
+const STOP_WORDS = new Set(["para", "com", "sem", "das", "dos", "uma", "por", "que", "empresa", "empresas", "servico", "servicos", "produto", "produtos", "sistema", "sistemas"]);
+
+function meaningfulTokens(value: unknown) {
+  return [...new Set(normalizeText(value).split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && !STOP_WORDS.has(word)).map((word) => {
+    if (word.endsWith("oes") && word.length > 5) return `${word.slice(0, -3)}ao`;
+    if (word.endsWith("ais") && word.length > 5) return `${word.slice(0, -3)}al`;
+    if (word.endsWith("s") && word.length > 5) return word.slice(0, -1);
+    return word;
+  }))];
+}
+
 function matchOffer(place: ApifyPlace, signals: string[], offer: Offer) {
   const placeText = normalizeText([place.title, place.categoryName, ...(place.categories ?? [])].join(" "));
   const categoryMatches = (offer.categorias ?? []).filter((category) => placeText.includes(normalizeText(category)));
   const signalMatches = (offer.sinais ?? []).filter((signal) => signals.includes(signal));
-  let compatibility = 25 + Math.round((Number(offer.prioridade) || 50) * 0.25);
-  compatibility += offer.categorias?.length ? (categoryMatches.length ? 35 : 0) : 15;
-  compatibility += Math.min(25, signalMatches.length * 15);
+  const placeTokens = new Set(meaningfulTokens(placeText));
+  const offerTokens = meaningfulTokens([offer.publico_alvo, ...(offer.categorias ?? [])].join(" "));
+  const tokenMatches = offerTokens.filter((token) => placeTokens.has(token));
+  let compatibility = 10 + Math.round((Number(offer.prioridade) || 50) * 0.15);
+  compatibility += categoryMatches.length ? 35 : Math.min(35, tokenMatches.length * 9);
+  compatibility += Math.min(20, signalMatches.length * 12);
   if (offer.etapa === "principal") compatibility += 5;
   compatibility = Math.min(100, compatibility);
   const reasons = [];
   if (categoryMatches.length) reasons.push(`categoria compatível: ${categoryMatches.slice(0, 2).join(", ")}`);
+  else if (tokenMatches.length) reasons.push(`atividade compatível: ${tokenMatches.slice(0, 3).join(", ")}`);
   if (signalMatches.length) reasons.push(`${signalMatches.length} sinal(is) de oportunidade relacionado(s)`);
-  if (!reasons.length) reasons.push("produto selecionado para este radar comercial");
-  return { offer, compatibility, reason: `Recomendação baseada em ${reasons.join(" e ")}.` };
+  if (!reasons.length) reasons.push("produto selecionado para validação neste radar comercial");
+  const outcome = cleanText(offer.resultado, 180);
+  return { offer, compatibility, reason: `Aderência baseada em ${reasons.join(" e ")}.${outcome ? ` Resultado a validar: ${outcome}` : ""}` };
 }
 
 async function radarOffers(ctx: any, radarId: string): Promise<Offer[]> {
@@ -66,7 +86,7 @@ async function radarOffers(ctx: any, radarId: string): Promise<Offer[]> {
   if (linkError) throw linkError;
   const ids = (links ?? []).map((link: { offer_id: string }) => link.offer_id);
   if (!ids.length) return [];
-  const { data, error } = await ctx.supabase.from("offers").select("id,nome,etapa,categorias,sinais,prioridade").in("id", ids).eq("ativo", true);
+  const { data, error } = await ctx.supabase.from("offers").select("id,nome,resultado,descricao,publico_alvo,tipo,etapa,categorias,sinais,prioridade").in("id", ids).eq("ativo", true);
   if (error) throw error;
   return (data ?? []) as Offer[];
 }
@@ -93,16 +113,16 @@ async function apifyRequest(path: string, token: string, init?: RequestInit) {
   return response.json();
 }
 
-function scorePlace(place: ApifyPlace) {
+function scorePlace(place: ApifyPlace, offerCompatibility: number | null) {
   const rating = Number(place.totalScore) || 0;
   const reviews = Math.max(0, Number(place.reviewsCount) || 0);
   const isOpen = !place.permanentlyClosed && !place.temporarilyClosed;
   const profile = Math.min(20, 7 + (place.address ? 4 : 0) + (isOpen ? 4 : 0) + (rating ? 5 : 0));
-  const opportunity = place.website ? 9 : 25;
-  const reputation = Math.min(20, Math.round((rating / 5) * 12) + Math.min(8, Math.floor(Math.log10(reviews + 1) * 4)));
-  const contact = (place.phone ? 9 : 0) + (place.website ? 6 : 0);
+  const compatibility = offerCompatibility == null ? 15 : Math.round(Math.max(0, Math.min(100, offerCompatibility)) * 0.3);
+  const reputation = Math.min(15, Math.round((rating / 5) * 9) + Math.min(6, Math.floor(Math.log10(reviews + 1) * 3)));
+  const contact = (place.phone ? 10 : 0) + (place.website ? 5 : 0);
   const confidence = Math.min(20, 5 + [place.address, place.phone, rating, place.url, place.website].filter(Boolean).length * 3);
-  return { total: Math.min(100, profile + opportunity + reputation + contact + confidence), profile, opportunity, reputation, contact, confidence, rating, reviews };
+  return { total: Math.min(100, profile + compatibility + reputation + contact + confidence), profile, compatibility, reputation, contact, confidence, rating, reviews };
 }
 
 async function markFailed(ctx: any, runId: string | null, radarId: string | null, message: string) {
@@ -125,15 +145,15 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
     const placeId = cleanText(place.placeId || place.cid || place.url || `${name}-${place.address}`, 300);
     if (!placeId || !name || place.permanentlyClosed) continue;
 
-    const score = scorePlace(place);
-    const potential = score.total >= 70 ? "alto" : score.total >= 45 ? "medio" : "baixo";
-    const confidence = score.confidence >= 17 ? "Alta" : score.confidence >= 11 ? "Média" : "Baixa";
     const signals: string[] = [];
     if (!place.website) signals.push("semSite");
     if (!place.phone) signals.push("semWhats");
     const sourceUrl = place.url ?? null;
     const offerMatches = offers.map((offer) => matchOffer(place, signals, offer)).sort((a, b) => b.compatibility - a.compatibility);
     const recommendation = offerMatches[0];
+    const score = scorePlace(place, recommendation?.compatibility ?? null);
+    const potential = score.total >= 70 ? "alto" : score.total >= 45 ? "medio" : "baixo";
+    const confidence = score.confidence >= 17 ? "Alta" : score.confidence >= 11 ? "Média" : "Baixa";
 
     const { data: company, error: companyError } = await ctx.supabase.from("empresas").upsert({
       user_id: run.user_id,
@@ -158,7 +178,7 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
       potencial: potential,
       status: "Nova",
       ultima_atualizacao: collectedAt.slice(0, 10),
-      servico_recomendado: recommendation?.offer.nome ?? (place.website ? "Otimização da presença digital e conversão" : "Criação de site e presença digital"),
+      servico_recomendado: recommendation?.offer.nome ?? null,
       sinais_keys: signals,
       business_status: place.temporarilyClosed ? "CLOSED_TEMPORARILY" : "OPERATIONAL",
       latitude: place.location?.lat ?? null,
@@ -178,16 +198,16 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
       if (matchError) throw matchError;
     }
 
-    await ctx.supabase.from("score_components").delete().eq("empresa_id", company.id).eq("versao_modelo", "apify-google-v1");
+    await ctx.supabase.from("score_components").delete().eq("empresa_id", company.id).in("versao_modelo", ["apify-google-v1", "offer-fit-v2"]);
     const { error: scoreError } = await ctx.supabase.from("score_components").insert([
       ["Perfil Google", score.profile, 20, "Completude e situação pública do estabelecimento no Google Maps."],
-      ["Oportunidade", score.opportunity, 25, place.website ? "Site encontrado; há espaço para otimização." : "Site não encontrado no perfil público."],
-      ["Reputação", score.reputation, 20, "Nota e volume de avaliações públicas no Google Maps."],
+      ["Compatibilidade com a oferta", score.compatibility, 30, recommendation ? recommendation.reason : "Nenhuma oferta foi vinculada ao radar; compatibilidade ainda não avaliada."],
+      ["Reputação", score.reputation, 15, "Nota e volume de avaliações públicas no Google Maps."],
       ["Contato", score.contact, 15, "Canais públicos de contato encontrados."],
       ["Confiança", score.confidence, 20, "Quantidade de campos verificáveis coletados via Apify."],
     ].map(([dimensao, pontos, maximo, explicacao]) => ({
       user_id: run.user_id, empresa_id: company.id, radar_run_id: run.id,
-      versao_modelo: "apify-google-v1", dimensao, pontos, maximo, explicacao,
+      versao_modelo: "offer-fit-v2", dimensao, pontos, maximo, explicacao,
     })));
     if (scoreError) throw scoreError;
 
