@@ -1987,19 +1987,34 @@ async function teamRequest(body){
   if(data&&data.error) throw new Error(data.error);
   return data;
 }
+function showTeamInviteLink(result){
+  const host=document.getElementById('teamInviteLinkResult');
+  if(!host) return;
+  host.hidden=false;
+  host.innerHTML=`<p><strong>Convite para <span id="teamLinkRecipient"></span></strong></p><p class="muted">Copie e envie somente para essa pessoa pelo WhatsApp ou outro canal privado. O link expira em 7 dias e exige acesso com o mesmo e-mail confirmado. Ele não concede acesso sozinho.</p><label for="teamLinkValue">Link de convite</label><input class="input" id="teamLinkValue" readonly autocomplete="off"><div class="row gap-8 wrap" style="margin-top:12px;"><button class="btn btn-primary" id="copyTeamInviteLink">Copiar link</button><button class="btn" id="closeTeamInviteLink">Fechar</button></div><p class="muted">O link não fica salvo no navegador. Se perdê-lo, gere um novo pela lista; o anterior será invalidado.</p>`;
+  const input=document.getElementById('teamLinkValue');
+  document.getElementById('teamLinkRecipient').textContent=result.email;
+  input.value=result.link;
+  document.getElementById('copyTeamInviteLink').onclick=async()=>{
+    try{await navigator.clipboard.writeText(input.value);toast('Link copiado. Envie somente ao destinatário informado.');}
+    catch(error){input.focus();input.select();toast('Selecionei o link. Copie manualmente com Ctrl+C ou Command+C.');}
+  };
+  document.getElementById('closeTeamInviteLink').onclick=()=>{host.replaceChildren();host.hidden=true;};
+  input.focus();
+}
 async function refreshTeamInvites(){
   const host=document.getElementById('teamInvitationList');
   if(!host) return;
   host.textContent='Consultando…';
   try{
     const data=await teamRequest({action:'list'});
-    const labels={sending:'Processando',sent:'Aceito pelo serviço de envio',failed:'Falha no envio',accepted:'Aceito',revoked:'Revogado'};
-    host.innerHTML=`<h4>Convites</h4>${(data.invitations||[]).map(item=>`<div class="row between wrap" style="gap:8px;padding:10px 0;border-top:1px solid var(--border);"><span>${esc(item.email)} · ${item.role==='viewer'?'Somente leitura':'Colaborador'} · ${esc(labels[item.status]||item.status)}${new Date(item.expires_at)<new Date()&&!['accepted','revoked'].includes(item.status)?' · Expirado':''}</span><div class="row gap-8">${['sent','failed'].includes(item.status)?`<button class="btn btn-sm" data-invite-action="resend" data-invite-id="${esc(item.id)}">Reenviar</button>`:''}${['sent','failed','sending'].includes(item.status)?`<button class="btn btn-sm" data-invite-action="revoke" data-invite-id="${esc(item.id)}">Revogar</button>`:''}</div></div>`).join('')||'<p>Nenhum convite.</p>'}<h4>Colaboradores</h4>${(data.members||[]).map(item=>`<div class="row between wrap" style="padding:10px 0;"><span>${esc(item.email)} · ${item.role==='viewer'?'Somente leitura':'Colaborador'}</span><button class="btn btn-sm" data-invite-action="remove_member" data-member-id="${esc(item.member_id)}">Remover acesso</button></div>`).join('')||'<p>Nenhum colaborador.</p>'}`;
+    const labels={sending:'Processando',sent:'Pendente de aceitação',failed:'Falha no envio',accepted:'Aceito',revoked:'Revogado'};
+    host.innerHTML=`<h4>Convites</h4>${(data.invitations||[]).map(item=>`<div class="row between wrap" style="gap:8px;padding:10px 0;border-top:1px solid var(--border);"><span>${esc(item.email)} · ${item.role==='viewer'?'Somente leitura':'Colaborador'} · ${esc(labels[item.status]||item.status)}${new Date(item.expires_at)<new Date()&&!['accepted','revoked'].includes(item.status)?' · Expirado':''}</span><div class="row gap-8 wrap">${['sent','failed'].includes(item.status)?`<button class="btn btn-sm" data-invite-action="resend" data-invite-delivery="link" data-invite-id="${esc(item.id)}">Gerar novo link</button><button class="btn btn-sm" data-invite-action="resend" data-invite-delivery="email" data-invite-id="${esc(item.id)}">Reenviar por e-mail</button>`:''}${['sent','failed','sending'].includes(item.status)?`<button class="btn btn-sm" data-invite-action="revoke" data-invite-id="${esc(item.id)}">Revogar</button>`:''}</div></div>`).join('')||'<p>Nenhum convite.</p>'}<h4>Colaboradores</h4>${(data.members||[]).map(item=>`<div class="row between wrap" style="padding:10px 0;"><span>${esc(item.email)} · ${item.role==='viewer'?'Somente leitura':'Colaborador'}</span><button class="btn btn-sm" data-invite-action="remove_member" data-member-id="${esc(item.member_id)}">Remover acesso</button></div>`).join('')||'<p>Nenhum colaborador.</p>'}`;
     host.querySelectorAll('[data-invite-action]').forEach(button=>button.onclick=async()=>{
       const action=button.dataset.inviteAction;
-      if(action!=='resend'&&!confirm('Confirma revogar este convite ou acesso?')) return;
+      if(!confirm(action==='resend'?'Gerar outro convite invalida o link anterior. Deseja continuar?':'Confirma revogar este convite ou acesso?')) return;
       button.disabled=true;
-      try{await teamRequest({action,id:button.dataset.inviteId,member_id:button.dataset.memberId});await refreshTeamInvites();}
+      try{const result=await teamRequest({action,delivery:button.dataset.inviteDelivery,id:button.dataset.inviteId,member_id:button.dataset.memberId});if(result.link) showTeamInviteLink(result);else if(result.message) toast(result.message);await refreshTeamInvites();}
       catch(error){toast(error.message);button.disabled=false;}
     });
   }catch(error){host.textContent=error.message;}
@@ -2419,7 +2434,7 @@ function renderConfiguracoes(){
   } else if(tab==='usuarios'){
     inner = `
       <p>${esc(state.user.email||'')} · ${state.isAccountOwner?'Titular da conta':'Colaborador'}</p>
-      ${state.isAccountOwner?`<div class="row gap-8 wrap"><input class="input" id="inviteEmail" type="email" placeholder="E-mail do colaborador" style="max-width:300px;"><select class="input" id="inviteRole" style="max-width:200px;"><option value="editor">Colaborador</option><option value="viewer">Somente leitura</option></select><button class="btn btn-primary" id="sendTeamInvite">Convidar</button><button class="btn" id="refreshTeamInvites">Atualizar lista</button></div><p class="muted">O convite expira em 7 dias. Colaboradores não se tornam administradores da plataforma.</p><div id="teamInvitationList">Clique em Atualizar lista para consultar convites e colaboradores.</div>`:'Somente o titular pode gerenciar colaboradores e convites.'}`;
+      ${state.isAccountOwner?`<div class="row gap-8 wrap"><input class="input" id="inviteEmail" type="email" placeholder="E-mail do colaborador" style="max-width:300px;"><select class="input" id="inviteRole" style="max-width:200px;"><option value="editor">Colaborador</option><option value="viewer">Somente leitura</option></select><button class="btn btn-primary" id="createTeamInviteLink">Gerar link de convite</button><button class="btn" id="sendTeamInvite">Enviar por e-mail</button><button class="btn" id="refreshTeamInvites">Atualizar lista</button></div><p class="muted">O link não depende de um serviço de envio. Enviar por e-mail exige remetente configurado. O convite expira em 7 dias e exige o mesmo e-mail confirmado. Colaboradores não se tornam administradores da plataforma.</p><div id="teamInviteLinkResult" class="card" style="margin:16px 0;" hidden></div><div id="teamInvitationList">Clique em Atualizar lista para consultar convites e colaboradores.</div>`:'Somente o titular pode gerenciar colaboradores e convites.'}`;
   } else if(tab==='integracoes'&&isPlatformAdmin){
     inner = `
       <div class="badge badge-blue" style="display:inline-flex;margin-bottom:12px;">Acesso exclusivo do administrador da plataforma</div>
@@ -2649,12 +2664,12 @@ function bindResultados(){
   });
 }
 function bindConfiguracoes(){
-  const invite=document.getElementById('sendTeamInvite');
-  if(invite) invite.onclick=async()=>{
-    invite.disabled=true;
-    try{ const result=await teamRequest({action:'invite',email:document.getElementById('inviteEmail').value,role:document.getElementById('inviteRole').value});toast(result.message);await refreshTeamInvites(); }
-    catch(error){toast(error.message);}finally{if(document.body.contains(invite)) invite.disabled=false;}
-  };
+  const inviteButtons=['createTeamInviteLink','sendTeamInvite'].map(id=>document.getElementById(id)).filter(Boolean);
+  inviteButtons.forEach(invite=>invite.onclick=async()=>{
+    inviteButtons.forEach(button=>button.disabled=true);
+    try{ const result=await teamRequest({action:'invite',delivery:invite.id==='createTeamInviteLink'?'link':'email',email:document.getElementById('inviteEmail').value,role:document.getElementById('inviteRole').value});if(result.link) showTeamInviteLink(result);else toast(result.message);await refreshTeamInvites(); }
+    catch(error){toast(error.message);}finally{inviteButtons.forEach(button=>{if(document.body.contains(button)) button.disabled=false;});}
+  });
   const refresh=document.getElementById('refreshTeamInvites');
   if(refresh) refresh.onclick=refreshTeamInvites;
   document.querySelectorAll('[data-configtab]').forEach(el=>{

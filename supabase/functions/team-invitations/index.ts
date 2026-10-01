@@ -52,8 +52,10 @@ export default { fetch: withSupabase({auth:'user'},async(req,ctx)=>{
       return Response.json({revoked:true});
     }
     if(!['invite','resend'].includes(action)) return Response.json({error:'Ação inválida'},{status:400});
+    if(body.delivery!==undefined&&!['email','link'].includes(body.delivery)) return Response.json({error:'Forma de convite inválida.'},{status:400});
+    const manualLink=body.delivery==='link';
     const apiKey=Deno.env.get('RESEND_API_KEY'),from=Deno.env.get('INVITE_FROM_EMAIL');
-    if(!apiKey||!from) return Response.json({error:'Envio não configurado: defina RESEND_API_KEY e INVITE_FROM_EMAIL no servidor.'},{status:503});
+    if(!manualLink&&(!apiKey||!from)) return Response.json({error:'Envio por e-mail não configurado. Use Gerar link de convite ou configure o remetente no servidor.'},{status:503});
     const appUrl=new URL(Deno.env.get('LEADSCOPE_SITE_URL')||'https://quantisgrowth.github.io/leadscope/');
     if(appUrl.protocol!=='https:') throw new Error('LEADSCOPE_SITE_URL deve usar HTTPS.');
     let email=String(body.email||'').trim().toLowerCase();
@@ -67,7 +69,7 @@ export default { fetch: withSupabase({auth:'user'},async(req,ctx)=>{
       if(error||!old) return Response.json({error:'Convite não encontrado.'},{status:404});
       if(!['sent','failed'].includes(old.status)||Date.now()-new Date(old.sent_at||old.created_at).getTime()<60000) return Response.json({error:'Aguarde um minuto ou revogue o convite pendente.'},{status:409});
       email=old.email;role=old.role;
-      const {data,error:claimError}=await admin.from('team_invitations').update({status:'sending',token_hash:tokenHash,expires_at:expiresAt,sent_at:null}).eq('id',old.id).eq('status',old.status).eq('token_hash',old.token_hash).select('*').maybeSingle();
+      const {data,error:claimError}=await admin.from('team_invitations').update({status:manualLink?'sent':'sending',token_hash:tokenHash,expires_at:expiresAt,sent_at:manualLink?new Date().toISOString():null,provider_message_id:null}).eq('id',old.id).eq('status',old.status).eq('token_hash',old.token_hash).select('*').maybeSingle();
       if(claimError) throw claimError;
       if(!data) return Response.json({error:'Outra operação está processando esse convite.'},{status:409});
       invitation=data;
@@ -78,12 +80,16 @@ export default { fetch: withSupabase({auth:'user'},async(req,ctx)=>{
       const {count,error:countError}=await admin.from('team_invitations').select('id',{count:'exact',head:true}).eq('account_id',owner).gte('created_at',new Date(Date.now()-3600000).toISOString());
       if(countError) throw countError;
       if((count||0)>=10) return Response.json({error:'Limite de 10 novos convites por hora atingido.'},{status:429});
-      const {data,error}=await admin.from('team_invitations').insert({account_id:owner,email,role,token_hash:tokenHash,expires_at:expiresAt}).select('*').single();
-      if(error?.code==='23505') return Response.json({error:'Já existe um convite pendente. Use Reenviar ou Revogar.'},{status:409});
+      const {data,error}=await admin.from('team_invitations').insert({account_id:owner,email,role,token_hash:tokenHash,expires_at:expiresAt,status:manualLink?'sent':'sending',sent_at:manualLink?new Date().toISOString():null}).select('*').single();
+      if(error?.code==='23505') return Response.json({error:'Já existe um convite pendente. Use Gerar novo link, Reenviar por e-mail ou Revogar.'},{status:409});
       if(error) throw error;
       invitation=data;
     }
     appUrl.search='';appUrl.hash='';appUrl.searchParams.set('team_invite',token);
+    // Existing SQL treats "sent" as an issued invitation eligible for acceptance.
+    // Manual delivery issues it without sending email; the raw token is returned once,
+    // never persisted. Regeneration replaces the hash and invalidates the old link.
+    if(manualLink) return Response.json({link:appUrl.href,email,expires_at:expiresAt,message:'Link gerado. Compartilhe somente com o destinatário informado.'},{headers:{'Cache-Control':'no-store'}});
     try {
       const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json','Idempotency-Key':`invite-${invitation.id}-${tokenHash}`},body:JSON.stringify({from,to:[email],subject:'Convite para participar do LeadScope',html:`<!doctype html><html lang="pt-BR"><body><h1>Você recebeu um convite para o LeadScope</h1><p>Entre com o e-mail que recebeu este convite. Se ainda não possui conta, crie sua senha e confirme seu e-mail.</p><p><a href="${escape(appUrl.href)}">Abrir o LeadScope e aceitar convite</a></p><p>O convite expira em 7 dias. Seu acesso será ${role==='viewer'?'somente leitura':'de colaborador'}. Se não esperava este convite, ignore esta mensagem.</p></body></html>`}),signal:AbortSignal.timeout(15000)});
       if(!response.ok) throw new Error(`O serviço de e-mail recusou o envio (${response.status}). Confira remetente e configuração.`);

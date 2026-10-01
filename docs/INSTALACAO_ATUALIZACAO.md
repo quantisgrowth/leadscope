@@ -45,6 +45,18 @@ O fluxo é exclusivamente manual; um novo commit não publica automaticamente no
 
 ## 3. Configuração de e-mail
 
+### Alternativa sem remetente verificado: copiar link
+
+Em **Configurações → Usuários**, informe o e-mail e o papel e clique em **Gerar link de convite → Copiar link**. Envie manualmente pelo WhatsApp ou outro canal privado. Esta opção não utiliza Resend, não envia e-mail e funciona sem `RESEND_API_KEY` ou `INVITE_FROM_EMAIL`. A URL padrão do LeadScope já está definida no servidor; `LEADSCOPE_SITE_URL` continua opcional para links, mas, se configurada, deve usar HTTPS.
+
+Somente o titular gera ou renova links. O destinatário precisa entrar com o mesmo e-mail confirmado no Supabase Auth, e clicar em Aceitar convite. O link expira em sete dias; revogação bloqueia a aceitação. Na lista, **Gerar novo link** espera pelo menos um minuto, preserva e-mail/papel e invalida o link anterior. O token original não fica salvo no banco nem no armazenamento do navegador do titular; somente seu hash é persistido. Copie antes de fechar o painel.
+
+Não é necessário executar nenhum SQL adicional ou reaplicar os SQLs 01/02. Publique novamente as funções pelo fluxo do GitHub Actions após este ajuste. O status interno `sent` significa convite emitido, inclusive quando entregue manualmente; a interface exibe **Pendente de aceitação**, não confirmação de envio de e-mail.
+
+**Limite importante:** compartilhar o convite por link não substitui a confirmação de e-mail do cadastro. Usuários já confirmados podem aceitar sem Resend. Para novos usuários, o Supabase Auth ainda precisa conseguir enviar a confirmação; o SMTP padrão possui restrições e não é adequado para produção. Não desligue a verificação para contornar isso. Consulte a [documentação de SMTP do Supabase](https://supabase.com/docs/guides/auth/auth-smtp).
+
+### Envio por e-mail (opcional)
+
 A nova função utiliza Resend para o convite, sem contratar serviço automaticamente. Se não houver conta ou domínio verificado, configure-os antes de usar. Guarde exclusivamente nos Secrets das funções:
 
 - `RESEND_API_KEY`: chave de envio do seu serviço Resend.
@@ -59,7 +71,7 @@ Valide o remetente/domínio no provedor e configure os registros DNS informados 
 
 ## 4. Fluxo de convite
 
-1. O titular abre Configurações → Usuários, escolhe e-mail e papel e clica em Convidar.
+1. O titular abre Configurações → Usuários, escolhe e-mail e papel e clica em Gerar link de convite (entrega manual) ou Enviar por e-mail (requer configuração do remetente).
 2. O destinatário abre o link. Se já tiver conta, entra com esse e-mail; se não tiver, faz cadastro, define senha e confirma o e-mail.
 3. Depois da confirmação, se necessário reabre o link original e clica em Aceitar convite. Abrir o link sozinho não aceita o convite.
 4. O servidor compara o destinatário com o e-mail confirmado no Auth e vincula a conta compartilhada. Não concede administração da plataforma.
