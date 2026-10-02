@@ -45,6 +45,7 @@ jobs:
           node tests/company-lists.mjs
           node tests/dashboard.mjs
           node tests/erp-qualification.mjs
+          node tests/radar-location.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 2.119.0

@@ -10,6 +10,10 @@ O SQL foi testado em PostgreSQL isolado com dados sintéticos: função real, pe
 
 ## O que muda
 
+- Localização: país, abrangência (cidade/estado/país), estado e cidade pesquisável. No Brasil, cidades vêm da API oficial do IBGE, por UF, com ID do município. Trocar estado/país limpa a cidade; nome fora da lista não inicia busca. Lista indisponível permite tentar novamente. Outros países têm região e cidade manuais, claramente identificadas. Cache de municípios somente durante a sessão, sem credenciais nem API paga.
+- Reputação: quantidade mínima de avaliações (11 significa mais de 10) e nota média mínima inclusiva, combinadas e sem filtro por padrão. Empresas sem o campo exigido são descartadas, sem substituir ausência por zero. Ambos os filtros são locais, após a coleta paga: podem retornar menos empresas, não economizam créditos e não disparam coleta extra para completar o pedido. Não habilitam textos de avaliações nem o filtro adicional pago de estrelas do coletor.
+- Esta atualização não exige SQL novo. Publique as funções pelo workflow na main para ativar os filtros no backend.
+
 - Radar mostra perfil herdado das ofertas, localização por cidade ou região/estado/país e critérios avançados recolhidos. A busca usa a área definida pela localização, não um raio de quilômetros (esse campo anterior não era aplicado pelo provedor).
 - Exclusões por nome, descrição e categorias são filtros locais após a coleta, não filtros que economizam créditos. Podem resultar em menos empresas do que a quantidade pedida.
 - Contatos do site e amostra de até 5 avaliações recentes são opcionais e começam desligados. Mantido teto de US$ 0,50 por execução. Não altera plano/limite mensal no Apify. O teto não garante cobertura mensal: acompanhe o saldo na conta e não inicie novas execuções sem crédito disponível. O provedor pode interromper a execução antes de completar a quantidade.

@@ -66,12 +66,10 @@ function bindErpQualification(){
   };
 }
 function radarEnrichmentOptions(){
-  return {exclude_terms:document.getElementById('rExclude').value.split(',').map(v=>v.trim()).filter(Boolean).slice(0,10),review_limit:document.getElementById('rReviews').checked?5:0,contacts:document.getElementById('rContacts').checked};
+  return {exclude_terms:document.getElementById('rExclude').value.split(',').map(v=>v.trim()).filter(Boolean).slice(0,10),review_limit:document.getElementById('rReviews').checked?5:0,contacts:document.getElementById('rContacts').checked,min_reviews:document.getElementById('rMinReviews').value===''?null:Number(document.getElementById('rMinReviews').value),min_rating:document.getElementById('rMinRating').value===''?null:Number(document.getElementById('rMinRating').value)};
 }
 function bindRadarErpOptions(){
-  const scope=document.getElementById('rScope'),local=document.getElementById('rLocalizacao');
-  const sync=()=>{document.getElementById('rAreaHint').textContent=scope.value==='city'?'A coleta utiliza a área da cidade informada. Não há raio em quilômetros aplicado.':'A coleta utiliza a área da região, estado ou país informado. Comece com poucas empresas para validar os resultados.';};
-  scope.value=/^brasil$/i.test(local.value.trim())?'region':'city';scope.onchange=sync;sync();
+  bindRadarLocation();
   const profile=()=>{const selected=state.offers.filter(o=>Array.from(document.querySelectorAll('[data-radar-offer]:checked')).some(el=>el.value===o.id));document.getElementById('rIdealProfile').textContent=selected.map(o=>`${o.nome}: ${o.publicoAlvo||'Público-alvo ainda não definido'}${o.resultado?' · Resultado a validar: '+o.resultado:''}`).join(' | ')||'Selecione um produto.';};
   document.querySelectorAll('[data-radar-offer]').forEach(el=>el.addEventListener('change',profile));profile();
 }

@@ -314,6 +314,7 @@ tr.row-hover:hover{background:var(--hover);}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="dashboard.js"></script>
+<script src="radar-location.js"></script>
 <script src="erp.js"></script>
 <script>
 /* ================= CONFIG SUPABASE ================= */
@@ -1408,10 +1409,11 @@ function renderRadar(){
           </label>`).join('')}</div>`:`<div class="badge badge-gray" style="display:block;padding:10px 12px;">Cadastre produtos em Configurações › Oferta comercial antes de iniciar o radar.</div>`}
       </div>
       <div class="verification-note"><b>Perfil herdado dos produtos selecionados</b><p id="rIdealProfile"></p><span class="muted">Edite o público-alvo e resultado em Configurações › Oferta comercial.</span></div>
-      <h3>Onde buscar</h3><div class="grid erp-fields">
-        <div class="field"><label class="label">Abrangência</label><select class="input" id="rScope"><option value="city">Cidade</option><option value="region">Região, estado ou país</option></select></div>
-        <div class="field"><label class="label">Localização</label><input class="input" id="rLocalizacao" value="${esc(ob.regiao)}" placeholder="Ex: Sorocaba, SP, Brasil"></div>
-      </div><p class="muted" id="rAreaHint"></p>
+      <h3>Onde buscar</h3>${renderRadarLocation(ob.regiao)}
+      <h3>Reputação pública <span class="muted">(opcional)</span></h3><div class="grid erp-fields">
+        <div class="field"><label class="label" for="rMinReviews">Quantidade mínima de avaliações</label><input class="input" type="number" id="rMinReviews" min="0" max="10000000" step="1" placeholder="Sem filtro"><p class="muted">Ex.: 11 para mais de 10 avaliações.</p></div>
+        <div class="field"><label class="label" for="rMinRating">Nota média mínima</label><select class="input" id="rMinRating"><option value="">Sem filtro</option>${[2,2.5,3,3.5,4,4.5,5].map(n=>`<option value="${n}">${String(n).replace('.',',')} estrelas ou mais</option>`).join('')}</select></div>
+      </div><p class="muted">Os dois critérios são combinados. Empresas sem o dado exigido são excluídas. Filtros são aplicados após a coleta, não reduzem seu custo e podem trazer menos resultados. Não é necessário coletar os textos das avaliações. Reputação não comprova serviços prestados nem necessidade de ERP.</p>
       <details style="margin:18px 0;"><summary>Critérios avançados e enriquecimento</summary>
       <div class="field" style="margin-top:12px;"><label class="label">Termos complementares (opcional)</label><input class="input" id="rPalavras" value="${esc(ob.palavrasChave)}" placeholder="Ex: locação de máquinas, com operador"></div>
       <div class="field"><label class="label">Excluir atividades (separadas por vírgula)</label><input class="input" id="rExclude" maxlength="500" placeholder="Ex: venda de peças, cursos"><p class="muted">Filtra os resultados coletados por nome, descrição e categoria. Não garante que todas as empresas indesejadas sejam excluídas e não reduz o custo da coleta.</p></div>
@@ -1458,6 +1460,10 @@ function bindRadarProcessing(){
     const limite=Number(document.getElementById('rQuantidade').value)||20;
     const raio=0; // Location polygon, not a misleading unused kilometre radius.
     const enrichment=radarEnrichmentOptions();
+    const reviewInput=document.getElementById('rMinReviews');
+    if(!reviewInput.checkValidity()){reviewInput.reportValidity();return;}
+    const geography=radarGeography();
+    if(!geography){toast('Selecione o país, o estado e uma cidade da lista conforme a abrangência.');return;}
     const selectedOfferIds=Array.from(document.querySelectorAll('[data-radar-offer]:checked')).map(item=>item.value);
     if(!nome||!categories.length||!localizacao){ toast('Informe o nome, ao menos uma categoria e a localização do radar.'); return; }
     if(!selectedOfferIds.length){ toast('Selecione ao menos um produto para o LeadScope recomendar.'); return; }
@@ -1491,7 +1497,7 @@ function bindRadarProcessing(){
       if(radarError) throw radarError;
       const {error:offerLinkError}=await sb.from('radar_offers').insert(selectedOfferIds.map(offerId=>({radar_id:radar.id,offer_id:offerId,user_id:state.userId})));
       if(offerLinkError) throw offerLinkError;
-      const { data:startData, error:startError }=await sb.functions.invoke('search-places',{body:{action:'start',radar_id:radar.id,query:queries[0],queries,location:localizacao,result_limit:limite,enrichment,area_scope:document.getElementById('rScope').value}});
+      const { data:startData, error:startError }=await sb.functions.invoke('search-places',{body:{action:'start',radar_id:radar.id,query:queries[0],queries,location:localizacao,result_limit:limite,enrichment,geography,area_scope:document.getElementById('rScope').value}});
       if(startError){
         let message=startError.message;
         if(startError.context&&typeof startError.context.json==='function'){

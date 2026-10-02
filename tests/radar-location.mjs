@@ -1,0 +1,56 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import {stripTypeScriptTypes} from 'node:module';
+const read=p=>fs.readFileSync(new URL('../'+p,import.meta.url),'utf8');
+const geo=read('radar-location.js'),html=read('index.html');
+const ctx=vm.createContext({Intl,AbortController,setTimeout,clearTimeout,esc:String,fetch:async()=>({ok:true,json:async()=>[{id:3552205,nome:'Sorocaba'}]})});
+vm.runInContext(geo,ctx);
+assert.ok(ctx.radarCountries().some(c=>c.code==='BR'&&c.name==='Brasil'));
+assert.equal(ctx.radarGeoNormalize('São PAULO'),'sao paulo');
+assert.equal((await ctx.radarMunicipalities('SP'))[0].id,3552205);
+await assert.rejects(()=>ctx.radarMunicipalities('XX'));
+const server=vm.createContext({withSupabase:()=>{},Response,console});
+vm.runInContext(stripTypeScriptTypes(read('supabase/functions/search-places/index.ts').replace(/^import .+;\n/gm,'')).replace('export default','const handler ='),server);
+const f=server.validateReputationFilters({min_reviews:11,min_rating:4.5});
+assert.equal(server.matchesReputation({reviewsCount:11,totalScore:4.5},f),true);
+assert.equal(server.matchesReputation({reviewsCount:10,totalScore:5},f),false);
+assert.equal(server.matchesReputation({reviewsCount:50,totalScore:4.4},f),false);
+assert.equal(server.matchesReputation({reviewsCount:null,totalScore:5},f),false);
+assert.equal(server.matchesReputation({reviewsCount:50,totalScore:null},f),false);
+assert.equal(server.matchesReputation({},{}),true);
+assert.equal(server.matchesReputation({reviewsCount:0},{min_reviews:0}),true);
+assert.equal(server.matchesReputation({},{min_reviews:0}),false);
+for(const min_reviews of [-1,1.5,'11',Infinity,10000001])assert.throws(()=>server.validateReputationFilters({min_reviews}));
+for(const min_rating of [-1,6,'4.5',NaN])assert.throws(()=>server.validateReputationFilters({min_rating}));
+assert.equal(server.validateReputationFilters({}).min_reviews,null);
+console.log('Radar: official locality IDs, country names, combined inclusive thresholds, missing vs zero and server input validation passed.');
+if(process.env.LEADSCOPE_BROWSER_QA){
+  const {chromium}=await import(process.env.LEADSCOPE_PLAYWRIGHT),browser=await chromium.launch({headless:true,executablePath:process.env.LEADSCOPE_CHROME});
+  const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  let fail=false;
+  await page.route('https://servicodados.ibge.gov.br/**',async route=>{
+    if(fail)return route.fulfill({status:503,body:'unavailable'});
+    const sp=route.request().url().includes('/SP/');await route.fulfill({contentType:'application/json',body:JSON.stringify(sp?[{id:3552205,nome:'Sorocaba'},{id:3509502,nome:'Campinas'}]:[{id:3106200,nome:'Belo Horizonte'}])});
+  });
+  const fixture=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${html.match(/<style>[\s\S]*?<\/style>/)[0]}</head><body><main style="padding:20px" id="root"></main><script>const state={onboarding:{regiao:'Campinas'}};const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');${geo}document.getElementById('root').innerHTML=renderRadarLocation('Campinas');bindRadarLocation();</script></body></html>`;
+  await page.route('http://localhost:43130/**',route=>route.fulfill({contentType:'text/html',body:fixture}));await page.goto('http://localhost:43130');
+  assert.equal(await page.evaluate(()=>radarGeography()),null);
+  await page.locator('#rState').selectOption('SP');await page.waitForFunction(()=>!document.getElementById('rCity').disabled);
+  await page.locator('#rCity').fill('campinas');assert.equal((await page.evaluate(()=>radarGeography())).city_id,3509502);
+  assert.equal(await page.locator('#rLocalizacao').inputValue(),'Campinas, São Paulo, Brasil');
+  await page.locator('#rCity').fill('Inventada');assert.equal(await page.evaluate(()=>radarGeography()),null);
+  await page.locator('#rCity').fill('Sorocaba');await page.locator('#rState').selectOption('MG');
+  await page.waitForFunction(()=>document.getElementById('rCityOptions').textContent===''&&document.getElementById('rCityOptions').children.length===1);
+  assert.equal(await page.locator('#rCity').inputValue(),'');
+  await page.locator('#rCity').fill('Belo Horizonte');assert.equal((await page.evaluate(()=>radarGeography())).city_id,3106200);
+  await page.locator('#rScope').selectOption('state');assert.equal(await page.locator('#rCityField').isVisible(),false);assert.equal((await page.evaluate(()=>radarGeography())).location,'Minas Gerais, Brasil');
+  await page.locator('#rScope').selectOption('country');assert.equal((await page.evaluate(()=>radarGeography())).location,'Brasil');
+  await page.locator('#rCountry').selectOption('PT');await page.locator('#rScope').selectOption('city');assert.equal(await page.locator('#rCity').inputValue(),'');
+  await page.locator('#rStateManual').fill('Lisboa');await page.locator('#rCity').fill('Lisboa');assert.equal((await page.evaluate(()=>radarGeography())).country_code,'PT');
+  await page.locator('#rCountry').selectOption('BR');assert.equal(await page.evaluate(()=>radarGeography()),null);
+  fail=true;await page.locator('#rState').selectOption('BA');await page.locator('#rGeoRetry').waitFor({state:'visible'});assert.equal(await page.evaluate(()=>radarGeography()),null);
+  fail=false;await page.locator('#rGeoRetry').click();await page.waitForFunction(()=>!document.getElementById('rCity').disabled);
+  for(const width of [1440,390]){await page.setViewportSize({width,height:900});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:`/tmp/leadscope-location-${width}.png`});}
+  assert.deepEqual(errors,[]);await browser.close();console.log('Browser: dependent selection, invalid cities, state/country scope, manual international region, retry and responsive layout passed.');
+}

@@ -139,6 +139,19 @@ async function markFailed(ctx: any, runId: string | null, radarId: string | null
   if (radarId) await ctx.supabase.from("radares").update({ status: "falhou", erro: message }).eq("id", radarId);
 }
 
+function validateReputationFilters(input: any) {
+  const minReviews = input?.min_reviews ?? null;
+  const minRating = input?.min_rating ?? null;
+  if (minReviews !== null && (typeof minReviews !== 'number' || !Number.isInteger(minReviews) || minReviews < 0 || minReviews > 10000000)) throw new Error('Quantidade mínima de avaliações inválida.');
+  if (minRating !== null && (typeof minRating !== 'number' || ![2, 2.5, 3, 3.5, 4, 4.5, 5].includes(minRating))) throw new Error('Nota mínima inválida.');
+  return { min_reviews: minReviews, min_rating: minRating };
+}
+function matchesReputation(place: ApifyPlace, filters: any) {
+  const { min_reviews: reviews, min_rating: rating } = filters || {};
+  if (reviews != null && (typeof place.reviewsCount !== 'number' || !Number.isFinite(place.reviewsCount) || place.reviewsCount < reviews)) return false;
+  if (rating != null && (typeof place.totalScore !== 'number' || !Number.isFinite(place.totalScore) || place.totalScore < rating)) return false;
+  return true;
+}
 async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
   const saved = [];
   const excluded = Array.isArray(run.provider_payload?.enrichment?.exclude_terms) ? run.provider_payload.enrichment.exclude_terms : [];
@@ -150,6 +163,7 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
     const name = cleanText(place.title);
     const placeId = cleanText(place.placeId || place.cid || place.url || `${name}-${place.address}`, 300);
     if (!placeId || !name || place.permanentlyClosed) continue;
+    if (!matchesReputation(place, run.provider_payload?.enrichment)) continue;
     const activity = normalizeText([place.title, place.description, place.categoryName, ...(place.categories ?? [])].join(' '));
     if (excluded.some((term: string) => activity.includes(normalizeText(term))) || seen.has(placeId)) continue;
     seen.add(placeId);
@@ -274,10 +288,23 @@ export default {
         const queries = requestedQueries.length ? requestedQueries : [query];
         const location = cleanText(body.location);
         const limit = Math.max(1, Math.min(20, Number(body.result_limit) || 20));
+        let reputation;
+        try { reputation = validateReputationFilters(body.enrichment); }
+        catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'Filtros inválidos.' }, { status: 400 }); }
         const enrichment = {
+          ...reputation,
           exclude_terms: Array.isArray(body.enrichment?.exclude_terms) ? body.enrichment.exclude_terms.map((v: unknown) => cleanText(v, 80)).filter(Boolean).slice(0, 10) : [],
           review_limit: body.enrichment?.review_limit === 5 ? 5 : 0,
           contacts: body.enrichment?.contacts === true,
+        };
+        const criteria = {
+          actor: APIFY_ACTOR, queries, enrichment,
+          geography: body.geography ? {
+            country_code: cleanText(body.geography.country_code, 2), state_code: cleanText(body.geography.state_code, 2),
+            state: cleanText(body.geography.state, 100), city: cleanText(body.geography.city, 100),
+            city_id: Number.isInteger(body.geography.city_id) ? body.geography.city_id : null,
+          } : null,
+          area_scope: ['country', 'state', 'region'].includes(body.area_scope) ? body.area_scope : 'city',
         };
         if (!radarId || !query || !location) return Response.json({ error: "Radar, segmento e localização são obrigatórios." }, { status: 400 });
 
@@ -286,6 +313,7 @@ export default {
         const { data: run, error: runError } = await ctx.supabase.from("radar_runs").insert({
           radar_id: radarId, user_id: userId, consulta: query, localizacao: location,
           limite_resultados: limit, provider: "apify", provider_status: "STARTING",
+          provider_payload: criteria, // Persist filters before starting a paid collection.
         }).select("id").single();
         if (runError) throw runError;
         runId = run.id;
@@ -309,7 +337,7 @@ export default {
 
         await ctx.supabase.from("radar_runs").update({
           provider_run_id: providerRun.id, provider_dataset_id: providerRun.defaultDatasetId ?? null,
-          provider_status: providerRun.status ?? "RUNNING", provider_payload: { actor: APIFY_ACTOR, queries, enrichment, area_scope: body.area_scope === 'region' ? 'region' : 'city' },
+          provider_status: providerRun.status ?? "RUNNING", provider_payload: criteria,
         }).eq("id", runId);
         await ctx.supabase.from("radares").update({
           status: "processando", fonte: PROVIDER, iniciado_em: new Date().toISOString(), erro: null,
