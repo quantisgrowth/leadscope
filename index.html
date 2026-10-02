@@ -288,6 +288,17 @@ tr.row-hover:hover{background:var(--hover);}
 .boot-spinner{width:34px;height:34px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--blue);animation:spin .8s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
 .auth-error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);color:#ff9a9a;font-size:12.5px;padding:10px 12px;border-radius:8px;margin-bottom:14px;}
+.dashboard-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;}
+.dashboard-grid .card{min-width:0;}
+.dashboard-note{color:var(--text-secondary);font-size:12px;line-height:1.6;overflow-wrap:anywhere;}
+.dashboard-bar-row{margin:12px 0;font-size:13px;}
+.dashboard-bar-track{height:7px;background:var(--input);border-radius:6px;margin-top:6px;overflow:hidden;}
+.dashboard-bar-track span{display:block;height:100%;background:var(--blue);border-radius:6px;}
+.dashboard-priority{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;border-top:1px solid var(--border);overflow-wrap:anywhere;}
+.dashboard-priority p{font-size:12px;margin:4px 0;}
+.dashboard-grid h2,.dashboard-grid h3{font-size:16px;}
+@media(max-width:900px){.dashboard-grid{grid-template-columns:minmax(0,1fr);}}
+@media(max-width:520px){.dashboard-priority{flex-wrap:wrap;}.dashboard-grid .card{padding:16px;}.dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}.dashboard-kpis .kpi-card{padding:14px;}.dashboard-kpis .kpi-val{font-size:26px;}}
 </style>
 </head>
 <body>
@@ -295,6 +306,7 @@ tr.row-hover:hover{background:var(--hover);}
 <div class="toast-wrap" id="toastWrap"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="dashboard.js"></script>
 <script>
 /* ================= CONFIG SUPABASE ================= */
 const SUPABASE_URL = "https://nlzlbrfwaloyxksaevne.supabase.co";
@@ -478,6 +490,7 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds, of
     statusHistory:(statusHistory||[]).map(item=>({from:item.status_anterior,to:item.status_novo,at:item.changed_at,by:item.changed_by})),
     status: row.status,
     createdAt: row.created_at || null,
+    analysisRecordedAt:row.analisado_em||row.coletado_em||null,
     analyzedAt: row.analisado_em || row.coletado_em || row.created_at || null,
     createdDate: row.created_at ? fmtDate(new Date(row.created_at)) : '',
     analysisDate: (row.analisado_em || row.coletado_em || row.created_at) ? fmtDate(new Date(row.analisado_em || row.coletado_em || row.created_at)) : '',
@@ -637,7 +650,7 @@ const DEFAULT_OPP_FILTERS = {
 const DEFAULT_UI_PREFS = {
   route:'#/overview', sidebarOpen:false,
   diagTone:'consultivo', detailTab:'perfil', configTab:'perfil',
-  theme:'dark', diagReturnRoute:'#/oportunidades', oppFilters:DEFAULT_OPP_FILTERS, listFilters:{},
+  theme:'dark', diagReturnRoute:'#/oportunidades', oppFilters:DEFAULT_OPP_FILTERS, listFilters:{}, dashboardPeriod:'30',
 };
 function loadUiPrefs(){
   try{
@@ -654,7 +667,7 @@ function saveUiPrefs(){
     localStorage.setItem('leadscope_ui_prefs_v1', JSON.stringify({
       route: state.route, sidebarOpen: state.sidebarOpen, diagTone: state.diagTone,
       detailTab: state.detailTab, configTab: state.configTab, theme:state.theme,
-      diagReturnRoute:state.diagReturnRoute, oppFilters: state.oppFilters, listFilters:state.listFilters,
+      diagReturnRoute:state.diagReturnRoute, oppFilters: state.oppFilters, listFilters:state.listFilters, dashboardPeriod:state.dashboardPeriod,
     }));
   }catch(e){}
 }
@@ -684,27 +697,42 @@ function setPathLocal(root, path, val){
 const setPath = setPathLocal;
 
 /* ================= SUPABASE: CARREGAR / GRAVAR DADOS ================= */
+async function readAllRows(queryFactory){
+  const rows=[];let offset=0;
+  try{
+    // Stable ordering supplied by the caller; follow the actual response size,
+    // not an assumed server limit. Never report a partial read as complete.
+    for(let page=0;page<200;page++){
+      const {data,error}=await queryFactory().range(offset,offset+499);
+      if(error)return {data:null,error};
+      if(!Array.isArray(data))return {data:null,error:new Error('Resposta de leitura inválida')};
+      if(!data.length)return {data:rows,error:null};
+      rows.push(...data);offset+=data.length;
+    }
+    return {data:null,error:new Error('Leitura excedeu o limite de segurança')};
+  }catch(error){return {data:null,error};}
+}
 async function loadAllData(userId){
   const {data:{session}}=await sb.auth.getSession();
   const authId=session&&session.user.id||userId;
   const {data:accountOwner}=await sb.rpc('current_account_id');
   const {data:canWrite}=await sb.rpc('current_account_can_write');
   userId=accountOwner||authId; // Compatible with the existing installation until SQL is applied.
-  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows}, {data:evidenciasRows}, {data:siteAuditRows}, {data:offerRows}, {data:offerMatchRows}, {data:folderRows}, {data:folderLinkRows}, {data:statusHistoryRows}, {data:adminMarker}, {data:integrationRows}, {data:scoreRows}] = await Promise.all([
+  const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows,error:companiesError}, {data:evidenciasRows,error:evidenceError}, {data:siteAuditRows,error:auditsError}, {data:offerRows}, {data:offerMatchRows}, {data:folderRows}, {data:folderLinkRows}, {data:statusHistoryRows,error:historyError}, {data:adminMarker}, {data:integrationRows}, {data:scoreRows,error:scoresError}] = await Promise.all([
     sb.from('profiles').select('*').eq('id', authId).maybeSingle(),
     sb.from('account_settings').select('*').eq('user_id', userId).maybeSingle(),
     sb.from('radares').select('*').eq('user_id', userId).order('criado_em', {ascending:false}),
-    sb.from('empresas').select('*').eq('user_id', userId).order('score', {ascending:false}),
-    sb.from('evidencias').select('*').order('data', {ascending:false}),
-    sb.from('site_audits').select('*').eq('user_id', userId).order('created_at', {ascending:false}),
+    readAllRows(()=>sb.from('empresas').select('*').eq('user_id', userId).order('score', {ascending:false}).order('id')),
+    readAllRows(()=>sb.from('evidencias').select('*').order('data', {ascending:false}).order('id')),
+    readAllRows(()=>sb.from('site_audits').select('*').eq('user_id', userId).order('created_at', {ascending:false}).order('id')),
     sb.from('offers').select('*').eq('user_id', userId).order('posicao', {ascending:true}),
     sb.from('company_offer_matches').select('*,offer:offers(*)').eq('user_id', userId).order('created_at', {ascending:false}),
     sb.from('opportunity_folders').select('*').eq('user_id', userId).order('updated_at', {ascending:false}),
     sb.from('opportunity_folder_companies').select('folder_id,empresa_id').eq('user_id', userId),
-    sb.from('company_status_history').select('empresa_id,status_anterior,status_novo,changed_by,changed_at').eq('user_id', userId).order('changed_at', {ascending:false}),
+    readAllRows(()=>sb.from('company_status_history').select('empresa_id,status_anterior,status_novo,changed_by,changed_at').eq('user_id', userId).order('changed_at', {ascending:false}).order('id')),
     sb.from('platform_admins').select('user_id').eq('user_id', authId).maybeSingle(),
     sb.from('platform_integrations').select('key,display_name,description,connected,sort_order').order('sort_order', {ascending:true}),
-    sb.from('score_components').select('empresa_id,dimensao,pontos,maximo,explicacao,calculado_em').eq('user_id',userId).order('calculado_em',{ascending:false}),
+    readAllRows(()=>sb.from('score_components').select('empresa_id,dimensao,pontos,maximo,explicacao,calculado_em').eq('user_id',userId).order('calculado_em',{ascending:false}).order('id')),
   ]);
   const evByEmpresa = {};
   (evidenciasRows||[]).forEach(e=>{ (evByEmpresa[e.empresa_id] = evByEmpresa[e.empresa_id]||[]).push(e); });
@@ -736,6 +764,7 @@ async function loadAllData(userId){
   companies.forEach(company=>{
     const rows=scoresByCompany[company.id]||[];
     company.scoreComponents=rows.length?rows.filter(item=>item.calculado_em===rows[0].calculado_em):[];
+    if(rows[0]?.calculado_em)company.analysisRecordedAt=rows[0].calculado_em;
   });
   const ob = rowToOnboarding(settings) || state.onboarding;
   setState({
@@ -747,6 +776,8 @@ async function loadAllData(userId){
     onboarded: !!(settings && settings.onboarded),
     onboardStep: Math.max(1, Math.min(3, Number((settings&&settings.onboarding_step)||1))),
     companies,
+    dashboardAvailability:{companies:!companiesError,history:!historyError,audits:!auditsError,evidence:!evidenceError,scores:!scoresError},
+    dashboardAudits:siteAuditRows||[],
     folders:(folderRows||[]).map(folder=>({id:folder.id,nome:folder.nome,cor:folder.cor||'#10a37f'})),
     integrations:(integrationRows||[]).map(item=>({key:item.key,name:item.display_name,description:item.description,connected:!!item.connected})),
     offers:(offerRows||[]).map(rowToOffer),
@@ -1023,14 +1054,12 @@ function render(){
       <div class="topbar">
         <button class="icon-btn hamburger" id="hamburger">${icon('menu')}</button>
         <div class="search-box">${icon('search')}<input placeholder="Buscar empresa, radar ou relatório..." id="topSearch"></div>
-        <select class="period-select" id="periodSelect">
-          <option>Últimos 7 dias</option>
-          <option selected>Últimos 30 dias</option>
-          <option>Últimos 90 dias</option>
+        <select class="period-select" id="periodSelect" aria-label="Período do dashboard" ${route==='overview'?'':'disabled'} title="Período dos indicadores da Visão geral; outras telas têm filtros próprios">
+          ${[['7','Últimos 7 dias'],['30','Últimos 30 dias'],['90','Últimos 90 dias'],['all','Todo o histórico']].map(([value,label])=>`<option value="${value}" ${(state.dashboardPeriod||'30')===value?'selected':''}>${label}</option>`).join('')}
         </select>
         <div style="flex:1"></div>
         <button class="btn btn-primary btn-sm" data-nav="#/radar">${icon('plus')} Nova busca</button>
-        <button class="icon-btn tooltip">${icon('bell')}<span class="dot-notif"></span><span class="tooltip-bubble">3 novas atualizações</span></button>
+        <button class="icon-btn tooltip" aria-label="Notificações não ativadas">${icon('bell')}<span class="tooltip-bubble">Notificações automáticas não ativadas</span></button>
         <div class="avatar tooltip">${initials(state.user.nome)}<span class="tooltip-bubble">${state.user.nome}</span></div>
       </div>
       <div class="content">${body}</div>
@@ -1050,6 +1079,7 @@ function activeRoute(href){
   return cur===target;
 }
 function bindShell(){
+  document.getElementById('periodSelect')?.addEventListener('change',event=>setState({dashboardPeriod:event.target.value}));
   document.querySelectorAll('[data-nav]').forEach(el=>{
     el.addEventListener('click', ()=>{ setState({sidebarOpen:false,oppFilterOpen:false}); navigate(el.getAttribute('data-nav')); });
   });
@@ -1273,86 +1303,7 @@ function bindOnboarding(){
 }
 
 /* ================= OVERVIEW ================= */
-function renderOverview(){
-  const cs = state.companies;
-  const kpis = [
-    {label:'Empresas analisadas', val:cs.length*8+34, trend:'+12% vs período anterior'},
-    {label:'Oportunidades encontradas', val:cs.length, trend:'+5 esta semana'},
-    {label:'Alto potencial', val:cs.filter(c=>c.potencial==='alto').length, trend:'Score ≥ 70'},
-    {label:'Empresas monitoradas', val:cs.filter(c=>c.monitorada).length, trend:'Acompanhamento ativo'},
-    {label:'Abordagens realizadas', val:cs.filter(c=>c.status!=='Nova').length, trend:'Últimos 30 dias'},
-    {label:'Reuniões geradas', val:cs.filter(c=>c.status==='Reunião agendada'||c.status==='Cliente').length, trend:'Últimos 30 dias'},
-  ];
-  const top5 = [...cs].sort((a,b)=>b.score-a.score).slice(0,5);
-  const signalCounts = {};
-  cs.forEach(c=> c.sinais.forEach(s=>{ signalCounts[s.texto] = (signalCounts[s.texto]||0)+1; }));
-  const topSignals = Object.entries(signalCounts).sort((a,b)=>b[1]-a[1]).slice(0,6);
-  const funnel = [{label:'Encontradas',v:240},{label:'Analisadas',v:190},{label:'Priorizadas',v:96},{label:'Abordadas',v:58},{label:'Responderam',v:27},{label:'Reuniões',v:14},{label:'Vendas',v:6}];
-  const weekly = [{label:'S1',v:8},{label:'S2',v:12},{label:'S3',v:10},{label:'S4',v:15},{label:'S5',v:18},{label:'S6',v:14},{label:'S7',v:20},{label:'S8',v:23}];
-
-  return `
-  <h1 class="page-title">Visão geral</h1>
-  <p class="page-sub">Resumo executivo das oportunidades de ${state.user.empresa} nos últimos 30 dias.</p>
-  <div class="kpi-grid" style="margin-bottom:22px;">
-    ${kpis.map(k=>`
-      <div class="kpi-card tooltip">
-        <div class="kpi-label">${k.label}</div>
-        <div class="kpi-val">${k.val}</div>
-        <div class="kpi-trend">${k.trend}</div>
-        <span class="tooltip-bubble">Indicador calculado a partir dos radares ativos</span>
-      </div>`).join('')}
-  </div>
-
-  <div class="grid" style="grid-template-columns:1.4fr 1fr;align-items:start;margin-bottom:22px;">
-    <div class="card">
-      <div class="card-title">Oportunidades encontradas por semana</div>
-      <div class="card-sub">Volume de novas oportunidades identificadas pelos radares ativos.</div>
-      ${lineChartSVG(weekly)}
-    </div>
-    <div class="card">
-      <div class="card-title">Funil comercial</div>
-      <div class="card-sub">Da descoberta até a venda, no período selecionado.</div>
-      ${funnelSVG(funnel)}
-    </div>
-  </div>
-
-  <div class="grid" style="grid-template-columns:1.4fr 1fr;align-items:start;">
-    <div class="card">
-      <div class="row between" style="margin-bottom:2px;">
-        <div class="card-title" style="margin:0;">Prioridades de hoje</div>
-        <span class="badge badge-blue">5 recomendadas</span>
-      </div>
-      <p class="card-sub">Empresas com maior potencial comercial, calculado a partir dos seus critérios.</p>
-      ${top5.map(c=>`
-        <div class="row between" style="padding:12px 0;border-top:1px solid var(--border);">
-          <div class="row gap-12" style="min-width:0;">
-            <div class="avatar" style="background:linear-gradient(135deg,${classificacao(c.score).color},#0b1e2e)">${initials(c.nome)}</div>
-            <div style="min-width:0;">
-              <div style="font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;">${c.nome}</div>
-              <div class="muted" style="font-size:12px;">${c.segmento} · ${companyLocation(c)}</div>
-              <div class="muted" style="font-size:12px;margin-top:2px;">${c.interpretacoes[0]}</div>
-            </div>
-          </div>
-          <div class="row gap-12" style="flex:0 0 auto;">
-            <div style="text-align:right;">
-              <div style="font-weight:700;color:${classificacao(c.score).color}">${c.score}</div>
-              <div class="muted" style="font-size:11px;">${c.servicoRecomendado.split(' ').slice(0,3).join(' ')}…</div>
-            </div>
-            <button class="btn btn-sm" data-diag="${c.id}">Ver diagnóstico</button>
-          </div>
-        </div>`).join('')}
-    </div>
-    <div class="card">
-      <div class="card-title">Principais sinais encontrados</div>
-      <p class="card-sub">Sinais públicos mais frequentes entre as empresas analisadas.</p>
-      ${topSignals.map(([txt,count])=>`
-        <div class="row between" style="padding:9px 0;border-top:1px solid var(--border);">
-          <span style="font-size:13px;max-width:78%;">${txt}</span>
-          <span class="badge badge-gray">${count}</span>
-        </div>`).join('')}
-    </div>
-  </div>`;
-}
+function renderOverview(){ return renderDashboard(); }
 
 /* ================= RADAR ================= */
 function categoryCatalog(){
@@ -2597,6 +2548,12 @@ function renderConfiguracoes(){
 
 /* ================= EVENT BINDING PER PAGE ================= */
 function bindPageEvents(route){
+  if(route==='overview')document.getElementById('refreshDashboard')?.addEventListener('click',async event=>{
+    const button=event.currentTarget;button.disabled=true;button.textContent='Atualizando…';
+    try{await loadAllData(state.authUserId||state.userId);}
+    catch{toast('Não foi possível atualizar os dados. Tente novamente.');}
+    finally{if(document.body.contains(button)){button.disabled=false;button.textContent='Atualizar dados';}}
+  });
   document.querySelectorAll('[data-diag]').forEach(el=>{
     el.addEventListener('click', ()=>{
       currentDiagId=el.getAttribute('data-diag');

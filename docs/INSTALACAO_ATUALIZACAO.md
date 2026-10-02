@@ -84,6 +84,11 @@ Convites expiram em sete dias. Revogar convite impede aceitação; Remover acess
 
 ## 5. Organização e histórico
 
+- A Visão geral usa apenas cadastros, datas explícitas de coleta/análise, auditorias e transições comerciais disponíveis. O seletor 7/30/90 dias ou Todo o histórico afeta os indicadores e movimentações do dashboard; a posição atual da carteira é mostrada separadamente e não depende do período.
+- As métricas contam empresas únicas, não número de tentativas ou reuniões. Entradas repetidas na mesma etapa contam uma empresa no período. Uma entrada em Cliente não presume contato, resposta ou reunião anterior. Registros iniciais sem etapa anterior não datam uma conversão.
+- Arquivadas permanecem nos resultados históricos; mescladas são agrupadas pelo cadastro principal. A conversão usa somente empresas criadas no período que tiveram entrada registrada em Cliente nesse mesmo período. Cliente significa negócio registrado no CRM, não comprovação de pagamento. Receita, ticket realizado e quantidade de reuniões não são inventados.
+- A leitura de empresas, evidências, auditorias, componentes de score e histórico comercial é paginada. Falhas não exibem dados parciais como completos: os indicadores afetados ficam indisponíveis. O dashboard avisa sobre histórico legado ou datas ausentes. Não há SQL novo nesta atualização.
+
 - Oportunidades, Diagnósticos e Empresas monitoradas compartilham busca, pastas, filtros, Tabela/Cards/Funil e exportação CSV das selecionadas ou dos resultados filtrados. Cada tela mantém seus próprios filtros, página e visualização no navegador; voltar do detalhe preserva a lista de origem.
 - Os contadores e exportações respeitam a tela: Monitoradas inclui somente empresas acompanhadas; Diagnósticos inclui cadastros com score e data de análise disponíveis. Seleções são limpas ao trocar de tela para evitar ações em outra lista.
 - Não há alertas simulados nem verificação automática nesta atualização. Monitoramento organiza empresas de interesse; reanalisar continua sendo uma ação manual. Esta alteração de interface não exige SQL ou publicação de funções e não inicia consumo externo.
