@@ -299,6 +299,13 @@ tr.row-hover:hover{background:var(--hover);}
 .dashboard-grid h2,.dashboard-grid h3{font-size:16px;}
 @media(max-width:900px){.dashboard-grid{grid-template-columns:minmax(0,1fr);}}
 @media(max-width:520px){.dashboard-priority{flex-wrap:wrap;}.dashboard-grid .card{padding:16px;}.dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}.dashboard-kpis .kpi-card{padding:14px;}.dashboard-kpis .kpi-val{font-size:26px;}}
+.erp-summary{grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;font-size:13px;overflow-wrap:anywhere;}
+.erp-fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;}
+.erp-fields textarea{min-height:100px;resize:vertical;}
+.radar-layout{grid-template-columns:minmax(0,1.3fr) minmax(0,.9fr);align-items:start;}
+.radar-layout>.card{min-width:0;overflow-wrap:anywhere;}
+@media(max-width:900px){.radar-layout{grid-template-columns:minmax(0,1fr);}}
+@media(max-width:700px){.erp-summary,.erp-fields{grid-template-columns:minmax(0,1fr);}}
 </style>
 </head>
 <body>
@@ -307,6 +314,7 @@ tr.row-hover:hover{background:var(--hover);}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="dashboard.js"></script>
+<script src="erp.js"></script>
 <script>
 /* ================= CONFIG SUPABASE ================= */
 const SUPABASE_URL = "https://nlzlbrfwaloyxksaevne.supabase.co";
@@ -458,9 +466,9 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds, of
   const rawSignals = sinaisFromKeys(row.sinais_keys);
   const sourceLabel=row.source_provider==='google_maps'?'Perfil comercial público':'Fonte pública verificada';
   if(!rawSignals.length) rawSignals.push({key:'perfilPublico', texto:'Estabelecimento localizado em uma fonte pública', fonte:sourceLabel, interpretacao:'Há dados públicos suficientes para iniciar uma qualificação comercial', servico:4});
-  const offer=offerMatch&&offerMatch.offer;
+  const offer=offerMatch&&Number(offerMatch.compatibilidade)>0&&offerMatch.offer;
   const sinais=contextualSignals(rawSignals,offer);
-  const contextualMatch=offerMatch?Object.assign({},offerMatch,{motivo:offerMatch.motivo||recommendationReason(offer,offerMatch.compatibilidade)}):null;
+  const contextualMatch=offer?Object.assign({},offerMatch,{motivo:offerMatch.motivo||recommendationReason(offer,offerMatch.compatibilidade)}):null;
   const legacyAgencyRecommendation=/cria[cç][aã]o de site|presen[cç]a digital|otimiza[cç][aã]o da presen[cç]a/i.test(row.servico_recomendado||'');
   const recommendedOffer=(offer&&offer.nome)||(!legacyAgencyRecommendation&&row.servico_recomendado)||'Nenhuma oferta compatível definida';
   const evidencias = (evidenciaRows||[]).map(e=>({
@@ -479,8 +487,13 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds, of
     telefone:row.telefone, site:row.site, redes:row.redes||[], nota:row.nota, avaliacoes:row.avaliacoes,
     categorias:[...new Set([row.segmento,...collectedCategories].filter(Boolean))], sourcePayload,
     siteAudit:latestAudit||null,
+    qualification:row.commercial_qualification||{},
+    qualificationReady:Object.prototype.hasOwnProperty.call(row,'commercial_qualification'),
     cnpjCandidates:Array.isArray(auditMetrics.cnpj_candidates)?auditMetrics.cnpj_candidates:[],
-    publicChannels:collectedChannels(auditMetrics,completedAudit),
+    publicChannels:[...collectedChannels(auditMetrics,completedAudit),...collectedChannels({
+      email_links:(Array.isArray(sourcePayload.emails)?sourcePayload.emails:[]).map(v=>'mailto:'+v),
+      social_links:['facebooks','instagrams','linkedIns','tiktoks','youtubes'].flatMap(key=>Array.isArray(sourcePayload[key])?sourcePayload[key]:[]),
+    },{url:row.source_url||row.google_maps_url,finished_at:row.coletado_em})].filter((channel,index,rows)=>rows.findIndex(r=>r.url===channel.url)===index),
     score:row.score, confianca:row.confianca, potencial:row.potencial,
     sinais, evidencias,
     interpretacoes:[...new Set(sinais.map(s=>s.interpretacao))].slice(0,3),
@@ -491,6 +504,7 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds, of
     status: row.status,
     createdAt: row.created_at || null,
     analysisRecordedAt:row.analisado_em||row.coletado_em||null,
+    collectedAt:row.coletado_em||null,
     analyzedAt: row.analisado_em || row.coletado_em || row.created_at || null,
     createdDate: row.created_at ? fmtDate(new Date(row.created_at)) : '',
     analysisDate: (row.analisado_em || row.coletado_em || row.created_at) ? fmtDate(new Date(row.analisado_em || row.coletado_em || row.created_at)) : '',
@@ -1068,7 +1082,7 @@ function render(){
   bindShell();
   bindPageEvents(route);
   if(state.readOnly){
-    document.querySelectorAll('#monitorBtn,#prepBtn,#reanalyzeCompanyBtn,#auditSiteBtn,#validateCnpjBtn,#bulkAddFolder,#bulkRemoveFolder,#bulkReanalyze,#bulkMonitor,#bulkStatus,#bulkArchive,#saveConfig,#saveOffer,#newOppFolder,#renameOppFolder,#deleteOppFolder,[data-setstatus],[data-offer-toggle],[data-result]').forEach(el=>{el.disabled=true;el.title='Acesso somente leitura';});
+    document.querySelectorAll('#saveErpQualification,#monitorBtn,#prepBtn,#reanalyzeCompanyBtn,#auditSiteBtn,#validateCnpjBtn,#bulkAddFolder,#bulkRemoveFolder,#bulkReanalyze,#bulkMonitor,#bulkStatus,#bulkArchive,#saveConfig,#saveOffer,#newOppFolder,#renameOppFolder,#deleteOppFolder,[data-setstatus],[data-offer-toggle],[data-result]').forEach(el=>{el.disabled=true;el.title='Acesso somente leitura';});
   }
 }
 function initials(name){ return name.split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase(); }
@@ -1379,12 +1393,12 @@ function renderRadar(){
   return `
   <h1 class="page-title">Radar</h1>
   <p class="page-sub">Configure uma nova busca para encontrar empresas com necessidades comerciais verificáveis.</p>
-  <div class="grid" style="grid-template-columns:1.3fr .9fr;align-items:start;">
+  <div class="grid radar-layout">
     <div class="card">
       <div class="card-title">Novo radar</div>
       <p class="card-sub">Busca empresas reais em fontes públicas e registra dados verificáveis.</p>
       <div class="field"><label class="label">Nome do radar</label><input class="input" id="rNome" placeholder="Ex: Clínicas odontológicas — Sorocaba" value="${esc(segmento+(ob.regiao?' — '+ob.regiao:''))}"></div>
-      <div class="field"><label class="label">Categorias de empresa <span class="muted">(até 5)</span></label><div class="category-picker" id="rCategoryPicker"><span id="rCategoryChips"></span><input class="category-input" id="rCategoryInput" autocomplete="off" placeholder="Digite e pressione Enter"><div class="category-suggestions" id="rCategorySuggestions"></div></div><div class="muted" style="font-size:11.5px;margin-top:6px;">Selecione uma sugestão ou pressione Enter para adicionar outra categoria.</div></div>
+      <h3>Quem buscar e o que oferecer</h3><div class="field"><label class="label">Categorias de empresa <span class="muted">(até 5)</span></label><div class="category-picker" id="rCategoryPicker"><span id="rCategoryChips"></span><input class="category-input" id="rCategoryInput" autocomplete="off" placeholder="Digite e pressione Enter"><div class="category-suggestions" id="rCategorySuggestions"></div></div><div class="muted" style="font-size:11.5px;margin-top:6px;">Selecione uma sugestão ou pressione Enter para adicionar outra categoria.</div></div>
       <div class="field">
         <label class="label">Produtos que poderão ser recomendados</label>
         ${activeOffers.length?`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">${activeOffers.map(offer=>`
@@ -1393,11 +1407,17 @@ function renderRadar(){
             <span><b style="display:block;color:var(--text);font-size:13px;">${esc(offer.nome)}</b><span class="muted" style="font-size:11.5px;">${esc((OFFER_STAGES.find(stage=>stage.key===offer.etapa)||{}).label||offer.etapa)} · ${esc(formatOfferPrice(offer))}</span></span>
           </label>`).join('')}</div>`:`<div class="badge badge-gray" style="display:block;padding:10px 12px;">Cadastre produtos em Configurações › Oferta comercial antes de iniciar o radar.</div>`}
       </div>
-      <div class="grid" style="grid-template-columns:1fr 1fr;">
-        <div class="field"><label class="label">Cidade ou região</label><input class="input" id="rLocalizacao" value="${esc(ob.regiao)}" placeholder="Ex: Sorocaba, SP"></div>
-        <div class="field"><label class="label">Raio de referência</label><select class="input" id="rRaio"><option value="5000">5 km</option><option value="15000" selected>15 km</option><option value="30000">30 km</option></select></div>
-      </div>
-      <div class="field"><label class="label">Termos complementares (opcional)</label><input class="input" id="rPalavras" value="${esc(ob.palavrasChave)}" placeholder="Ex: implante, ortodontia"></div>
+      <div class="verification-note"><b>Perfil herdado dos produtos selecionados</b><p id="rIdealProfile"></p><span class="muted">Edite o público-alvo e resultado em Configurações › Oferta comercial.</span></div>
+      <h3>Onde buscar</h3><div class="grid erp-fields">
+        <div class="field"><label class="label">Abrangência</label><select class="input" id="rScope"><option value="city">Cidade</option><option value="region">Região, estado ou país</option></select></div>
+        <div class="field"><label class="label">Localização</label><input class="input" id="rLocalizacao" value="${esc(ob.regiao)}" placeholder="Ex: Sorocaba, SP, Brasil"></div>
+      </div><p class="muted" id="rAreaHint"></p>
+      <details style="margin:18px 0;"><summary>Critérios avançados e enriquecimento</summary>
+      <div class="field" style="margin-top:12px;"><label class="label">Termos complementares (opcional)</label><input class="input" id="rPalavras" value="${esc(ob.palavrasChave)}" placeholder="Ex: locação de máquinas, com operador"></div>
+      <div class="field"><label class="label">Excluir atividades (separadas por vírgula)</label><input class="input" id="rExclude" maxlength="500" placeholder="Ex: venda de peças, cursos"><p class="muted">Filtra os resultados coletados por nome, descrição e categoria. Não garante que todas as empresas indesejadas sejam excluídas e não reduz o custo da coleta.</p></div>
+      <label class="checkbox-row"><input type="checkbox" id="rContacts"> Enriquecer contatos comerciais publicados no site</label>
+      <label class="checkbox-row"><input type="checkbox" id="rReviews"> Coletar até 5 avaliações recentes por empresa</label>
+      <p class="muted">Opcionais podem consumir créditos adicionais. Teto por execução: US$ 0,50, sem alterar seu limite mensal. O teto pode encerrar a coleta antes da quantidade solicitada. Avaliações não comprovam necessidade de ERP.</p></details>
       <div class="field"><label class="label">Quantidade de resultados</label><select class="input" id="rQuantidade">${[5,10,15,20].map(n=>`<option value="${n}" ${String(ob.qtdOportunidades)===String(n)?'selected':''}>${n} empresas</option>`).join('')}</select></div>
       <button class="btn btn-primary btn-block" id="runRadar">${icon('radar')} Analisar oportunidades</button>
     </div>
@@ -1421,6 +1441,7 @@ function renderRadar(){
 }
 function bindRadarProcessing(){
   bindRadarCategoryPicker();
+  bindRadarErpOptions();
   document.querySelectorAll('[data-radar-offer]').forEach(input=>input.addEventListener('change',()=>{
     radarOfferIds=Array.from(document.querySelectorAll('[data-radar-offer]:checked')).map(item=>item.value);
   }));
@@ -1435,7 +1456,8 @@ function bindRadarProcessing(){
     const localizacao=document.getElementById('rLocalizacao').value.trim();
     const palavras=document.getElementById('rPalavras').value.trim();
     const limite=Number(document.getElementById('rQuantidade').value)||20;
-    const raio=Number(document.getElementById('rRaio').value)||15000;
+    const raio=0; // Location polygon, not a misleading unused kilometre radius.
+    const enrichment=radarEnrichmentOptions();
     const selectedOfferIds=Array.from(document.querySelectorAll('[data-radar-offer]:checked')).map(item=>item.value);
     if(!nome||!categories.length||!localizacao){ toast('Informe o nome, ao menos uma categoria e a localização do radar.'); return; }
     if(!selectedOfferIds.length){ toast('Selecione ao menos um produto para o LeadScope recomendar.'); return; }
@@ -1469,7 +1491,7 @@ function bindRadarProcessing(){
       if(radarError) throw radarError;
       const {error:offerLinkError}=await sb.from('radar_offers').insert(selectedOfferIds.map(offerId=>({radar_id:radar.id,offer_id:offerId,user_id:state.userId})));
       if(offerLinkError) throw offerLinkError;
-      const { data:startData, error:startError }=await sb.functions.invoke('search-places',{body:{action:'start',radar_id:radar.id,query:queries[0],queries,location:localizacao,result_limit:limite}});
+      const { data:startData, error:startError }=await sb.functions.invoke('search-places',{body:{action:'start',radar_id:radar.id,query:queries[0],queries,location:localizacao,result_limit:limite,enrichment,area_scope:document.getElementById('rScope').value}});
       if(startError){
         let message=startError.message;
         if(startError.context&&typeof startError.context.json==='function'){
@@ -1956,6 +1978,7 @@ function renderDiagnostico(){
     </div>
   </div>
 
+  ${renderErpSummary(c)}
   <div class="card" style="margin-bottom:18px;">
     <div class="card-title">Como abordar</div>
     <p class="card-sub">Mensagem sugerida, gerada a partir das evidências encontradas. Edite livremente antes de enviar.</p>
@@ -1972,7 +1995,7 @@ function renderDiagnostico(){
 
   <div class="card">
     <div class="tabs">
-      ${[['perfil','Perfil comercial'],['site','Site'],['avaliacoes','Avaliações'],['jornada','Jornada de contato'],['presenca','Presença digital']].map(([k,l])=>`<span class="tab ${state.detailTab===k?'active':''}" data-detail="${k}">${l}</span>`).join('')}
+      ${[['perfil','Perfil comercial'],['operacao','Operação e qualificação'],['site','Site'],['avaliacoes','Avaliações'],['jornada','Jornada de contato'],['presenca','Presença digital']].map(([k,l])=>`<span class="tab ${state.detailTab===k?'active':''}" data-detail="${k}">${l}</span>`).join('')}
     </div>
     <div style="padding-top:18px;">${renderDetailTab(c, state.detailTab)}</div>
   </div>
@@ -1998,6 +2021,7 @@ function verificationBadge(v){
   return `<span class="badge badge-gray">Não verificado</span>`;
 }
 function renderDetailTab(c, tab){
+  if(tab==='operacao') return renderErpTab(c);
   if(tab==='perfil'){
     const extraCategories=(c.categorias||[]).filter(category=>normalizeText(category)!==normalizeText(c.perfil.categoria));
     const cnpjBadge=c.cnpjValidatedAt
@@ -2063,6 +2087,7 @@ function renderDetailTab(c, tab){
     ${kv('Volume', c.avaliacoes!=null?esc(c.avaliacoes):'Não informado')}
     ${kv('Sentimento predominante', verificationBadge(c.avaliacoesInfo.sentimento))}
     ${kv('Temas recorrentes', c.avaliacoesInfo.temas.length?c.avaliacoesInfo.temas.map(esc).join(', '):verificationBadge(null))}
+    ${renderErpReviews(c)}
     <div class="divider"></div>
     <div class="badge badge-warn" style="display:block;padding:10px 12px;line-height:1.5;">${icon('alert')} As avaliações são sinais públicos e não comprovam, isoladamente, a qualidade operacional da empresa.</div>
     `;
@@ -2223,6 +2248,7 @@ async function runSiteAudit(){
   }
 }
 function bindDiagnostico(){
+  bindErpQualification();
   document.querySelectorAll('[data-tone]').forEach(el=>{
     el.addEventListener('click', ()=> setState({diagTone: el.getAttribute('data-tone')}));
   });
@@ -2247,7 +2273,7 @@ function bindDiagnostico(){
     const {data,error}=await sb.from('company_versions').select('empresa_id,snapshot,captured_at,changed_by').in('empresa_id',ids).order('captured_at',{ascending:false}).limit(30);
     versionsButton.disabled=false;
     if(error){host.textContent='Histórico indisponível. Aplique os SQLs de instalação.';return;}
-    host.innerHTML=(data||[]).map(version=>`<div style="padding:10px 0;border-top:1px solid var(--border);"><b>${esc(fmtDateTime(version.captured_at))}</b><div>${esc(version.snapshot.nome)} · ${esc(version.snapshot.status||'')} · Score ${esc(version.snapshot.score)} · ${esc(version.snapshot.servico_recomendado||'Sem recomendação')}</div><div class="muted">Registro ${esc(version.empresa_id)} · Autor ${esc(version.changed_by||'Instalação ou sistema')}</div></div>`).join('')||'Nenhuma versão registrada.';
+    host.innerHTML=(data||[]).map(version=>`<div style="padding:10px 0;border-top:1px solid var(--border);"><b>${esc(fmtDateTime(version.captured_at))}</b><div>${esc(version.snapshot.nome)} · ${esc(version.snapshot.status||'')} · Score ${esc(version.snapshot.score)} · ${esc(version.snapshot.servico_recomendado||'Sem recomendação')}</div>${renderQualificationVersion(version.snapshot)}<div class="muted">Registro ${esc(version.empresa_id)} · Autor ${esc(version.changed_by||'Instalação ou sistema')}</div></div>`).join('')||'Nenhuma versão registrada.';
   };
   document.querySelectorAll('[data-merge-company]').forEach(button=>button.onclick=async()=>{
     const source=state.companies.find(c=>c.id===button.dataset.mergeCompany),target=state.companies.find(c=>c.id===currentDiagId);

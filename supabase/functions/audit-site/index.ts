@@ -60,6 +60,22 @@ const PAGE_FUNCTION = `async function pageFunction({ page }) {
     }
     const emailLinks = links.filter(link => /^mailto:/i.test(link.href)).map(link => link.href.split('?')[0]).slice(0, 10);
     const phoneLinks = links.filter(link => /^tel:/i.test(link.href)).map(link => link.href).slice(0, 10);
+    // Deterministic observations, not instructions to an AI and not confirmed pains.
+    const operationalRules = [
+      ['Locação de equipamentos', /loca[çc][aã]o|aluguel/i],
+      ['Terraplanagem e obras', /terraplanagem|escava[çc][aã]o|demoli[çc][aã]o/i],
+      ['Transporte e frota', /transporte|frota|log[íi]stica/i],
+      ['Máquinas e equipamentos', /retroescavadeira|escavadeira|guindaste|munck|empilhadeira|compactador|betoneira/i],
+      ['Manutenção e assistência', /manuten[çc][aã]o|assist[êe]ncia t[ée]cnica/i],
+      ['Contratos e recorrência', /contratos?|loca[çc][aã]o mensal|mensalidade/i],
+      ['Operador', /com operador|sem operador/i],
+      ['Unidades e filiais', /filiais|filial|nossas unidades/i],
+      ['Orçamento e reserva', /solicite.{0,20}or[çc]amento|reserv(e|a)|cota[çc][aã]o/i],
+    ];
+    const operationalSignals = operationalRules.flatMap(([label, pattern]) => {
+      const match = bodyText.match(pattern);
+      return match ? [{ label, context: bodyText.slice(Math.max(0, match.index - 70), match.index + match[0].length + 110).replace(/\\s+/g, ' '), source: location.href }] : [];
+    });
     const seoPassed = title.length >= 10 && description.length >= 50 && h1Count >= 1;
     return {
       pageUrl: location.href,
@@ -77,6 +93,7 @@ const PAGE_FUNCTION = `async function pageFunction({ page }) {
       emailLinks,
       phoneLinks,
       cnpjCandidates,
+      operationalSignals,
       checks: {
         https: location.protocol === 'https:',
         responsive: hasResponsiveViewport && !horizontalOverflow,
@@ -259,7 +276,8 @@ export default {
         whatsapp_links: technical.whatsappLinks || [], booking_links: technical.bookingLinks || [],
         contact_forms: technical.contactForms || 0, social_links: technical.socialLinks || [],
         email_links: technical.emailLinks || [], phone_links: technical.phoneLinks || [],
-        cnpj_candidates: technical.cnpjCandidates || [], enrichment_version: 1,
+        cnpj_candidates: technical.cnpjCandidates || [], enrichment_version: 2,
+        operational_signals: technical.operationalSignals || [],
       };
       const finishedAt = new Date().toISOString();
       const { data: saved, error: saveError } = await ctx.supabase.from("site_audits").update({

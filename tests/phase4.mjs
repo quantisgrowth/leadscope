@@ -50,6 +50,9 @@ assert.equal(result.cnpjCandidates[0].cnpj,'11222333000181');
 assert.equal(result.socialLinks.length,1);
 assert.equal(result.emailLinks.length,1);
 assert.equal(result.phoneLinks.length,1);
+const operational=await extract('Locação mensal de retroescavadeira com operador. Solicite orçamento. Manutenção preventiva.');
+assert.ok(operational.operationalSignals.some(r=>r.label==='Máquinas e equipamentos'));
+assert.ok(operational.operationalSignals.every(r=>r.source===audit.url));
 assert.equal((await extract('Número de pedido: 11222333000181')).cnpjCandidates.length,0);
 assert.equal((await extract('CNPJ: 12.ABC.345/01DE-35')).cnpjCandidates.length,1);
 

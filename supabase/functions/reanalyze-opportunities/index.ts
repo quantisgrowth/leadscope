@@ -54,26 +54,26 @@ function meaningfulTokens(value: unknown) {
   }))];
 }
 
-function matchOffer(company: Company, payload: Record<string, unknown>, signals: string[], offer: Offer) {
+function matchOffer(company: Company, payload: Record<string, unknown>, signals: string[], offer: Offer, operationalText = '') {
   const categories = Array.isArray(payload.categories) ? payload.categories : [];
   const verifiedActivity = company.cnpj_validated_at && Number(company.cnpj_identity_score) >= 50 ? company.cnpj_cnae_description : null;
-  const companyText = normalizeText([company.nome, company.segmento, payload.categoryName, ...categories, verifiedActivity].join(" "));
+  const companyText = normalizeText([company.nome, company.segmento, payload.categoryName, payload.description, ...categories, verifiedActivity, operationalText].join(" "));
   const categoryMatches = (offer.categorias ?? []).filter((category) => companyText.includes(normalizeText(category)));
-  const signalMatches = (offer.sinais ?? []).filter((signal) => signals.includes(signal));
+  const digitalOffer = /site|marketing|seo|digital|tr[aá]fego/i.test([offer.nome, offer.resultado].join(' '));
+  const signalMatches = (offer.sinais ?? []).filter((signal) => signals.includes(signal) && (digitalOffer || !['semSite','semWhats'].includes(signal)));
   const companyTokens = new Set(meaningfulTokens(companyText));
   const offerTokens = meaningfulTokens([offer.publico_alvo, ...(offer.categorias ?? [])].join(" "));
   const tokenMatches = offerTokens.filter((token) => companyTokens.has(token));
-  let compatibility = 10 + Math.round((Number(offer.prioridade) || 50) * 0.15);
-  compatibility += categoryMatches.length ? 35 : Math.min(35, tokenMatches.length * 9);
-  compatibility += Math.min(20, signalMatches.length * 12);
-  if (offer.etapa === "principal") compatibility += 5;
+  let compatibility = categoryMatches.length ? 70 : Math.min(70, tokenMatches.length * 14);
+  compatibility += Math.min(30, signalMatches.length * 10);
   compatibility = Math.min(100, compatibility);
   const reasons: string[] = [];
   if (categoryMatches.length) reasons.push(`categoria compatível: ${categoryMatches.slice(0, 2).join(", ")}`);
   else if (tokenMatches.length) reasons.push(`atividade compatível: ${tokenMatches.slice(0, 3).join(", ")}`);
   if (signalMatches.length) reasons.push(`${signalMatches.length} sinal(is) de oportunidade relacionado(s)`);
   if (verifiedActivity && (categoryMatches.length || tokenMatches.length)) reasons.push("atividade cadastral da empresa incluída na comparação");
-  if (!reasons.length) reasons.push("produto ativo na esteira para validação comercial");
+  if (operationalText && (categoryMatches.length || tokenMatches.length)) reasons.push("sinais públicos da página auditada incluídos; necessidade ainda não confirmada");
+  if (!reasons.length) reasons.push("nenhuma correspondência pública encontrada; validar atividade em conversa");
   const outcome = cleanText(offer.resultado, 180);
   return { offer, compatibility, reason: `Aderência baseada em ${reasons.join(" e ")}.${outcome ? ` Resultado a validar: ${outcome}` : ""}` };
 }
@@ -81,25 +81,29 @@ function matchOffer(company: Company, payload: Record<string, unknown>, signals:
 function scoreCompany(company: Company, payload: Record<string, unknown>, offerCompatibility: number | null) {
   const rating = Number(company.nota ?? payload.totalScore) || 0;
   const reviews = Math.max(0, Number(company.avaliacoes ?? payload.reviewsCount) || 0);
-  const isOpen = company.business_status !== "CLOSED_PERMANENTLY" && payload.permanentlyClosed !== true;
+  const isOpen = !['CLOSED_PERMANENTLY','CLOSED_TEMPORARILY'].includes(company.business_status||'') && payload.permanentlyClosed !== true && payload.temporarilyClosed !== true;
   const sourceUrl = company.google_maps_url || company.source_url;
-  const profile = Math.min(20, 7 + (company.endereco ? 4 : 0) + (isOpen ? 4 : 0) + (rating ? 5 : 0));
-  const compatibility = offerCompatibility == null ? 15 : Math.round(Math.max(0, Math.min(100, offerCompatibility)) * 0.3);
-  const reputation = Math.min(15, Math.round((rating / 5) * 9) + Math.min(6, Math.floor(Math.log10(reviews + 1) * 3)));
-  const contact = (company.telefone ? 10 : 0) + (company.site ? 5 : 0);
-  const confidence = Math.min(20, 5 + [company.endereco, company.telefone, rating, sourceUrl, company.site].filter(Boolean).length * 3);
-  return { total: Math.min(100, profile + compatibility + reputation + contact + confidence), profile, compatibility, reputation, contact, confidence };
+  const profile = Math.min(10, 2 + (company.endereco ? 2 : 0) + (isOpen ? 2 : 0) + (rating ? 4 : 0));
+  const compatibility = offerCompatibility == null ? 0 : Math.round(Math.max(0, Math.min(100, offerCompatibility)) * 0.6);
+  const reputation = Math.min(5, Math.round((rating / 5) * 3) + Math.min(2, Math.floor(Math.log10(reviews + 1))));
+  const contact = (company.telefone ? 7 : 0) + (company.site ? 3 : 0);
+  const confidence = Math.min(15, 5 + [company.endereco, company.telefone, rating, sourceUrl, company.site].filter(Boolean).length * 2);
+  const total = Math.min(100, profile + compatibility + reputation + contact + confidence);
+  return { total, profile, compatibility, reputation, contact, confidence };
 }
 
 async function reanalyzeCompany(ctx: any, company: Company, offers: Offer[]) {
   const payload = (company.source_payload && Object.keys(company.source_payload).length ? company.source_payload : company.dados_google) ?? {};
   const signals = Array.isArray(company.sinais_keys) ? company.sinais_keys : [];
-  const matches = offers.map((offer) => matchOffer(company, payload, signals, offer)).sort((a, b) => b.compatibility - a.compatibility || b.offer.prioridade - a.offer.prioridade);
-  const recommendation = matches[0];
+  const {data:audit,error:auditError} = await ctx.supabase.from('site_audits').select('metrics').eq('empresa_id',company.id).eq('user_id',company.user_id).eq('status','concluido').order('finished_at',{ascending:false}).limit(1).maybeSingle();
+  if(auditError) throw auditError;
+  const operationalText = Array.isArray(audit?.metrics?.operational_signals) ? audit.metrics.operational_signals.map((v: any) => cleanText(v.context,400)).join(' ') : '';
+  const matches = offers.map((offer) => matchOffer(company, payload, signals, offer, operationalText)).sort((a, b) => b.compatibility - a.compatibility || b.offer.prioridade - a.offer.prioridade);
+  const recommendation = matches.find(match => match.compatibility > 0);
   const score = scoreCompany(company, payload, recommendation?.compatibility ?? null);
   const analyzedAt = new Date().toISOString();
   const potential = score.total >= 70 ? "alto" : score.total >= 45 ? "medio" : "baixo";
-  const confidence = score.confidence >= 17 ? "Alta" : score.confidence >= 11 ? "Média" : "Baixa";
+  const confidence = score.confidence >= 13 ? "Alta" : score.confidence >= 9 ? "Média" : "Baixa";
 
   const matchRows = matches.map((match, index) => ({
       user_id: company.user_id,
@@ -113,16 +117,16 @@ async function reanalyzeCompany(ctx: any, company: Company, offers: Offer[]) {
     }));
 
   const componentRows = [
-    ["Perfil comercial público", score.profile, 20, "Completude e situação pública do estabelecimento na fonte consultada."],
-    ["Compatibilidade com a oferta", score.compatibility, 30, recommendation ? recommendation.reason : "Nenhuma oferta ativa foi encontrada; compatibilidade ainda não avaliada."],
-    ["Reputação", score.reputation, 15, "Nota e volume de avaliações na fonte pública consultada."],
-    ["Contato", score.contact, 15, "Canais públicos de contato encontrados."],
-    ["Confiança", score.confidence, 20, "Quantidade de campos públicos verificáveis já coletados."],
+    ["Perfil comercial público", score.profile, 10, "Completude e situação pública do estabelecimento na fonte consultada."],
+    ["Compatibilidade com a oferta", score.compatibility, 60, recommendation ? recommendation.reason : "Nenhuma correspondência com uma oferta foi identificada; valide em conversa."],
+    ["Reputação", score.reputation, 5, "Nota e volume de avaliações, sem inferir faturamento ou orçamento."],
+    ["Contato", score.contact, 10, "Canais públicos de contato encontrados."],
+    ["Confiança", score.confidence, 15, "Quantidade de campos públicos verificáveis já coletados."],
   ].map(([dimensao, pontos, maximo, explicacao]) => ({
     user_id: company.user_id,
     empresa_id: company.id,
     radar_run_id: null,
-    versao_modelo: "offer-reanalysis-v3",
+    versao_modelo: "erp-public-fit-v4",
     dimensao,
     pontos,
     maximo,

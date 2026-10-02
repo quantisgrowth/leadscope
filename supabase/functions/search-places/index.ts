@@ -10,6 +10,7 @@ type ApifyPlace = {
   cid?: string;
   title?: string;
   categoryName?: string;
+  description?: string;
   categories?: string[];
   address?: string;
   city?: string;
@@ -62,22 +63,22 @@ function meaningfulTokens(value: unknown) {
 }
 
 function matchOffer(place: ApifyPlace, signals: string[], offer: Offer) {
-  const placeText = normalizeText([place.title, place.categoryName, ...(place.categories ?? [])].join(" "));
+  const placeText = normalizeText([place.title, place.description, place.categoryName, ...(place.categories ?? [])].join(" "));
   const categoryMatches = (offer.categorias ?? []).filter((category) => placeText.includes(normalizeText(category)));
-  const signalMatches = (offer.sinais ?? []).filter((signal) => signals.includes(signal));
+  const digitalOffer = /site|marketing|seo|digital|tr[aá]fego/i.test([offer.nome, offer.resultado, offer.descricao].join(' '));
+  const signalMatches = (offer.sinais ?? []).filter((signal) => signals.includes(signal) && (digitalOffer || !['semSite','semWhats'].includes(signal)));
   const placeTokens = new Set(meaningfulTokens(placeText));
   const offerTokens = meaningfulTokens([offer.publico_alvo, ...(offer.categorias ?? [])].join(" "));
   const tokenMatches = offerTokens.filter((token) => placeTokens.has(token));
-  let compatibility = 10 + Math.round((Number(offer.prioridade) || 50) * 0.15);
-  compatibility += categoryMatches.length ? 35 : Math.min(35, tokenMatches.length * 9);
-  compatibility += Math.min(20, signalMatches.length * 12);
-  if (offer.etapa === "principal") compatibility += 5;
+  // Priority and ladder position are not evidence of product fit.
+  let compatibility = categoryMatches.length ? 70 : Math.min(70, tokenMatches.length * 14);
+  compatibility += Math.min(30, signalMatches.length * 10);
   compatibility = Math.min(100, compatibility);
   const reasons = [];
   if (categoryMatches.length) reasons.push(`categoria compatível: ${categoryMatches.slice(0, 2).join(", ")}`);
   else if (tokenMatches.length) reasons.push(`atividade compatível: ${tokenMatches.slice(0, 3).join(", ")}`);
   if (signalMatches.length) reasons.push(`${signalMatches.length} sinal(is) de oportunidade relacionado(s)`);
-  if (!reasons.length) reasons.push("produto selecionado para validação neste radar comercial");
+  if (!reasons.length) reasons.push("nenhuma correspondência pública encontrada; validar atividade em conversa");
   const outcome = cleanText(offer.resultado, 180);
   return { offer, compatibility, reason: `Aderência baseada em ${reasons.join(" e ")}.${outcome ? ` Resultado a validar: ${outcome}` : ""}` };
 }
@@ -119,12 +120,13 @@ function scorePlace(place: ApifyPlace, offerCompatibility: number | null) {
   const rating = Number(place.totalScore) || 0;
   const reviews = Math.max(0, Number(place.reviewsCount) || 0);
   const isOpen = !place.permanentlyClosed && !place.temporarilyClosed;
-  const profile = Math.min(20, 7 + (place.address ? 4 : 0) + (isOpen ? 4 : 0) + (rating ? 5 : 0));
-  const compatibility = offerCompatibility == null ? 15 : Math.round(Math.max(0, Math.min(100, offerCompatibility)) * 0.3);
-  const reputation = Math.min(15, Math.round((rating / 5) * 9) + Math.min(6, Math.floor(Math.log10(reviews + 1) * 3)));
-  const contact = (place.phone ? 10 : 0) + (place.website ? 5 : 0);
-  const confidence = Math.min(20, 5 + [place.address, place.phone, rating, place.url, place.website].filter(Boolean).length * 3);
-  return { total: Math.min(100, profile + compatibility + reputation + contact + confidence), profile, compatibility, reputation, contact, confidence, rating, reviews };
+  const profile = Math.min(10, 2 + (place.address ? 2 : 0) + (isOpen ? 2 : 0) + (rating ? 4 : 0));
+  const compatibility = offerCompatibility == null ? 0 : Math.round(Math.max(0, Math.min(100, offerCompatibility)) * 0.6);
+  const reputation = Math.min(5, Math.round((rating / 5) * 3) + Math.min(2, Math.floor(Math.log10(reviews + 1))));
+  const contact = (place.phone ? 7 : 0) + (place.website ? 3 : 0);
+  const confidence = Math.min(15, 5 + [place.address, place.phone, rating, place.url, place.website].filter(Boolean).length * 2);
+  const total = Math.min(100, profile + compatibility + reputation + contact + confidence);
+  return { total, profile, compatibility, reputation, contact, confidence, rating, reviews };
 }
 
 async function markFailed(ctx: any, runId: string | null, radarId: string | null, message: string) {
@@ -139,6 +141,8 @@ async function markFailed(ctx: any, runId: string | null, radarId: string | null
 
 async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
   const saved = [];
+  const excluded = Array.isArray(run.provider_payload?.enrichment?.exclude_terms) ? run.provider_payload.enrichment.exclude_terms : [];
+  const seen = new Set<string>();
   const collectedAt = new Date().toISOString();
   const offers = await radarOffers(ctx, run.radar_id);
 
@@ -146,16 +150,19 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
     const name = cleanText(place.title);
     const placeId = cleanText(place.placeId || place.cid || place.url || `${name}-${place.address}`, 300);
     if (!placeId || !name || place.permanentlyClosed) continue;
+    const activity = normalizeText([place.title, place.description, place.categoryName, ...(place.categories ?? [])].join(' '));
+    if (excluded.some((term: string) => activity.includes(normalizeText(term))) || seen.has(placeId)) continue;
+    seen.add(placeId);
 
     const signals: string[] = [];
     if (!place.website) signals.push("semSite");
     if (!place.phone) signals.push("semWhats");
     const sourceUrl = place.url ?? null;
     const offerMatches = offers.map((offer) => matchOffer(place, signals, offer)).sort((a, b) => b.compatibility - a.compatibility);
-    const recommendation = offerMatches[0];
+    const recommendation = offerMatches.find(match => match.compatibility > 0);
     const score = scorePlace(place, recommendation?.compatibility ?? null);
     const potential = score.total >= 70 ? "alto" : score.total >= 45 ? "medio" : "baixo";
-    const confidence = score.confidence >= 17 ? "Alta" : score.confidence >= 11 ? "Média" : "Baixa";
+    const confidence = score.confidence >= 13 ? "Alta" : score.confidence >= 9 ? "Média" : "Baixa";
 
     const { data: company, error: companyError } = await ctx.supabase.rpc("save_company_collection", { p_payload: {
       user_id: run.user_id,
@@ -169,7 +176,7 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
       dados_google: place,
       nome: name,
       segmento: place.categoryName ?? place.categories?.[0] ?? run.consulta,
-      cidade: place.city ?? run.localizacao,
+      cidade: place.city || null,
       endereco: place.address ?? null,
       telefone: place.phone ?? null,
       site: place.website ?? null,
@@ -198,14 +205,14 @@ async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
     }
 
     const { error: scoreError } = await ctx.supabase.from("score_components").insert([
-      ["Perfil comercial público", score.profile, 20, "Completude e situação pública do estabelecimento na fonte consultada."],
-      ["Compatibilidade com a oferta", score.compatibility, 30, recommendation ? recommendation.reason : "Nenhuma oferta foi vinculada ao radar; compatibilidade ainda não avaliada."],
-      ["Reputação", score.reputation, 15, "Nota e volume de avaliações na fonte pública consultada."],
-      ["Contato", score.contact, 15, "Canais públicos de contato encontrados."],
-      ["Confiança", score.confidence, 20, "Quantidade de campos públicos verificáveis coletados."],
+      ["Perfil comercial público", score.profile, 10, "Completude e situação pública do estabelecimento na fonte consultada."],
+      ["Compatibilidade com a oferta", score.compatibility, 60, recommendation ? recommendation.reason : "Nenhuma correspondência com uma oferta foi identificada; valide em conversa."],
+      ["Reputação", score.reputation, 5, "Nota e volume de avaliações, sem inferir faturamento ou orçamento."],
+      ["Contato", score.contact, 10, "Canais públicos de contato encontrados."],
+      ["Confiança", score.confidence, 15, "Quantidade de campos públicos verificáveis coletados."],
     ].map(([dimensao, pontos, maximo, explicacao]) => ({
       user_id: run.user_id, empresa_id: company.id, radar_run_id: run.id,
-      versao_modelo: "offer-fit-v2", dimensao, pontos, maximo, explicacao, calculado_em: collectedAt,
+      versao_modelo: "erp-public-fit-v4", dimensao, pontos, maximo, explicacao, calculado_em: collectedAt,
     })));
     if (scoreError) throw scoreError;
 
@@ -267,6 +274,11 @@ export default {
         const queries = requestedQueries.length ? requestedQueries : [query];
         const location = cleanText(body.location);
         const limit = Math.max(1, Math.min(20, Number(body.result_limit) || 20));
+        const enrichment = {
+          exclude_terms: Array.isArray(body.enrichment?.exclude_terms) ? body.enrichment.exclude_terms.map((v: unknown) => cleanText(v, 80)).filter(Boolean).slice(0, 10) : [],
+          review_limit: body.enrichment?.review_limit === 5 ? 5 : 0,
+          contacts: body.enrichment?.contacts === true,
+        };
         if (!radarId || !query || !location) return Response.json({ error: "Radar, segmento e localização são obrigatórios." }, { status: 400 });
 
         const { data: radar, error: radarError } = await ctx.supabase.from("radares").select("id").eq("id", radarId).single();
@@ -283,7 +295,8 @@ export default {
           body: JSON.stringify({
             searchStringsArray: queries, locationQuery: location, maxCrawledPlacesPerSearch: limit,
             language: "pt-BR", skipClosedPlaces: true, scrapePlaceDetailPage: true,
-            maxReviews: 0, maxImages: 0, scrapeContacts: true,
+            maxReviews: enrichment.review_limit, reviewsSort: "newest", reviewsOrigin: "google", scrapeReviewsPersonalData: false,
+            maxImages: 0, scrapeContacts: enrichment.contacts,
             scrapeSocialMediaProfiles: {
               facebooks: false, instagrams: false, youtubes: false, tiktoks: false, twitters: false,
             },
@@ -296,7 +309,7 @@ export default {
 
         await ctx.supabase.from("radar_runs").update({
           provider_run_id: providerRun.id, provider_dataset_id: providerRun.defaultDatasetId ?? null,
-          provider_status: providerRun.status ?? "RUNNING", provider_payload: { actor: APIFY_ACTOR, queries },
+          provider_status: providerRun.status ?? "RUNNING", provider_payload: { actor: APIFY_ACTOR, queries, enrichment, area_scope: body.area_scope === 'region' ? 'region' : 'city' },
         }).eq("id", runId);
         await ctx.supabase.from("radares").update({
           status: "processando", fonte: PROVIDER, iniciado_em: new Date().toISOString(), erro: null,

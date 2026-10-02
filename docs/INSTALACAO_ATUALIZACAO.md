@@ -1,5 +1,9 @@
 # Instalação: histórico, pastas e convites
 
+## Atualização de radar e ERP
+
+O novo radar, a ficha comercial e o score v4 estão descritos em [Qualificação para ERP](QUALIFICACAO_ERP.md). Para habilitar o salvamento da ficha, aplique somente o SQL 04 após os SQLs anteriores e publique novamente as funções pelo fluxo manual. Não repita os SQLs 01–03.
+
 Esta entrega altera somente o repositório. Nenhum SQL foi executado no projeto remoto, nenhuma função foi publicada no Supabase e nenhum convite real foi enviado.
 
 ## 1. SQLs

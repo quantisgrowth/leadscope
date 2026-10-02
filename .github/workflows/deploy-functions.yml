@@ -44,6 +44,7 @@ jobs:
           node tests/csv-export.mjs
           node tests/company-lists.mjs
           node tests/dashboard.mjs
+          node tests/erp-qualification.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 2.119.0
