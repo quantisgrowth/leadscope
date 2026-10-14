@@ -27,6 +27,9 @@ assert.equal(m.auditedIds.size,1,'Audit counted per canonical company, successfu
 assert.equal(m.reached('Cliente').size,3,'No double count for repeat or merged history; initial snapshot excluded');
 assert.equal(m.reached('Contatada').size,1,'Repeat entries count one company');
 assert.equal(m.reached('Reunião agendada').size,1,'A Client entry does not infer a meeting');
+assert.deepEqual([...ctx.dashboardMetricIds(m,2)],['a']);
+assert.deepEqual([...ctx.dashboardMetricIds(m,5)].sort(),['a','c']);
+assert.deepEqual([...ctx.dashboardMetricIds(m,1)].sort(),['a','c']);
 assert.equal(m.cohortClients.length,2,'Old clients excluded from new-lead conversion');
 assert.equal(m.current.find(s=>s.label==='Cliente').v,3,'Current stock excludes archived and merged');
 assert.equal(m.legacy,1);
@@ -65,13 +68,16 @@ if(process.env.LEADSCOPE_BROWSER_QA){
   const page=await browser.newPage(),errors=[];
   page.on('pageerror',error=>errors.push(error.message));
   const fixture={...state,companies,dashboardPeriod:'30',dashboardAudits:audits,dashboardAvailability:{history:true,companies:true,audits:true}};
-  const boot=`const state=${JSON.stringify(fixture)};const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');const companyLocation=c=>c.cidade||'Não informado';${js}function render(){document.getElementById('root').innerHTML=renderDashboard();}document.getElementById('testPeriod').onchange=e=>{state.dashboardPeriod=e.target.value;render();};render();`;
+const boot=`const state=${JSON.stringify(fixture)};const DEFAULT_OPP_FILTERS={};let navigated='';function navigate(route){navigated=route;}const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');const companyLocation=c=>c.cidade||'Não informado';${js}function render(){document.getElementById('root').innerHTML=renderDashboard();bindDashboardDrilldown();}document.getElementById('testPeriod').onchange=e=>{state.dashboardPeriod=e.target.value;render();};render();`;
   await page.route('**/*',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:'<!doctype html><html data-theme="light"><head><meta charset="utf-8">'+html.match(/<style>[\s\S]*?<\/style>/)[0]+'</head><body><select id="testPeriod"><option value="30">30 dias</option><option value="7">7 dias</option><option value="all">Tudo</option></select><main id="root" style="padding:24px"></main><script>'+boot+'</script></body></html>'}));
   await page.goto('http://localhost:43128');
   for(const width of [1440,390]){
     await page.setViewportSize({width,height:1000});
     for(const period of ['7','30','all']){await page.locator('#testPeriod').selectOption(period);assert.ok(await page.locator('h1').textContent());}
     await page.screenshot({path:'/tmp/leadscope-dashboard-'+width+'.png',fullPage:width>900});
+    await page.locator('[data-dashboard-metric="0"]').click();
+    assert.equal(await page.evaluate(()=>navigated),'#/oportunidades');
+    assert.equal(await page.evaluate(()=>state.dashboardDrilldown.ids.length),await page.evaluate(()=>dashboardModel(state.companies,state.dashboardPeriod,new Date(),state.dashboardAvailability,state.dashboardAudits).newIds.size));
     if(width<900){
       await page.locator('.dashboard-grid').scrollIntoViewIfNeeded();
       await page.screenshot({path:'/tmp/leadscope-dashboard-mobile-etapas.png'});
@@ -82,8 +88,10 @@ if(process.env.LEADSCOPE_BROWSER_QA){
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   }
   await page.evaluate(()=>{state.companies=[];state.dashboardAudits=[];render();});
+  await page.getByText('Definições, qualidade dos dados e histórico',{exact:true}).click();
   assert.ok((await page.locator('#root').innerText()).includes('Nenhuma transição registrada'));
   await page.evaluate(()=>{state.dashboardAvailability.history=false;render();});
+  await page.getByText('Definições, qualidade dos dados e histórico',{exact:true}).click();
   assert.ok((await page.locator('#root').innerText()).includes('Histórico comercial indisponível'));
   assert.deepEqual(errors,[]);await browser.close();
   console.log('Dashboard browser QA passed: 7/30/all periods, empty/unavailable data, desktop/mobile layout and no script errors.');

@@ -44,7 +44,7 @@ type Offer = {
 };
 
 function cleanText(value: unknown, max = 240) {
-  return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
+  return String(value ?? "").replace(/[\u0000-\u001f\u007f]/g,' ').trim().replace(/\s+/g, " ").slice(0, max);
 }
 
 function normalizeText(value: unknown) {
@@ -152,115 +152,105 @@ function matchesReputation(place: ApifyPlace, filters: any) {
   if (rating != null && (typeof place.totalScore !== 'number' || !Number.isFinite(place.totalScore) || place.totalScore < rating)) return false;
   return true;
 }
+function validateRadarCriteria(input: any) {
+  const reputation = validateReputationFilters(input);
+  const mode = (value: unknown) => {
+    if (value == null) return 'required';
+    if (!['required','preferred','off'].includes(String(value))) throw new Error('Modo de critério inválido.');
+    return String(value);
+  };
+  const categories = Array.isArray(input?.categories) ? input.categories.map((v: unknown) => cleanText(v,100)).filter(Boolean).slice(0,5) : [];
+  return {...reputation, min_reviews_mode:mode(input?.min_reviews_mode),min_rating_mode:mode(input?.min_rating_mode),
+    category_mode:input?.category_mode == null ? 'off' : mode(input.category_mode),categories};
+}
+function evaluateRadarPlace(place: ApifyPlace, criteria: any) {
+  const reasons: string[] = [], preferences: string[] = [], unknowns: string[] = [];
+  const apply = (key: string, mode: string, known: boolean, passes: boolean) => {
+    if (mode === 'off') return;
+    if (!known) unknowns.push(key);
+    if (mode === 'required' && !passes) reasons.push(known ? key : key+'_unknown');
+    if (mode === 'preferred' && passes) preferences.push(key);
+  };
+  if (!cleanText(place.title) || !cleanText(place.placeId || place.cid || place.url || place.address)) reasons.push('invalid_profile');
+  if (place.permanentlyClosed) reasons.push('permanently_closed');
+  if (criteria.min_reviews != null) apply('min_reviews',criteria.min_reviews_mode||'required',typeof place.reviewsCount==='number'&&Number.isFinite(place.reviewsCount),typeof place.reviewsCount==='number'&&place.reviewsCount>=criteria.min_reviews);
+  if (criteria.min_rating != null) apply('min_rating',criteria.min_rating_mode||'required',typeof place.totalScore==='number'&&Number.isFinite(place.totalScore),typeof place.totalScore==='number'&&place.totalScore>=criteria.min_rating);
+  const categories = [place.categoryName,...(Array.isArray(place.categories)?place.categories:[])].filter(Boolean).map(normalizeText);
+  if (criteria.categories?.length) apply('category',criteria.category_mode||'off',categories.length>0,criteria.categories.some((v: string)=>categories.includes(normalizeText(v))));
+  const activity = normalizeText([place.title,place.description,...categories].join(' '));
+  if ((criteria.exclude_terms||[]).some((term: string)=>activity.includes(normalizeText(term)))) reasons.push('excluded_activity');
+  return {decision:reasons.length?'discarded':'accepted',reasons,preferences,unknowns};
+}
+function radarSnapshot(place: ApifyPlace) {
+  const textList=(value: unknown,max=10)=>Array.isArray(value)?value.slice(0,max).map(v=>cleanText(v,240)).filter(Boolean):[];
+  const snapshot = {placeId:cleanText(place.placeId,300)||null,cid:cleanText(place.cid,300)||null,title:cleanText(place.title),
+    categoryName:cleanText(place.categoryName,100)||null,categories:textList(place.categories),description:cleanText(place.description,1500),
+    address:cleanText(place.address,500)||null,city:cleanText(place.city,100)||null,phone:cleanText(place.phone,100)||null,website:cleanText(place.website,1000)||null,
+    totalScore:typeof place.totalScore==='number'&&Number.isFinite(place.totalScore)?place.totalScore:null,
+    reviewsCount:typeof place.reviewsCount==='number'&&Number.isFinite(place.reviewsCount)?place.reviewsCount:null,
+    url:cleanText(place.url,1000)||null,permanentlyClosed:!!place.permanentlyClosed,temporarilyClosed:!!place.temporarilyClosed,
+    emails:textList(place.emails,5),instagrams:textList(place.instagrams,3),facebooks:textList(place.facebooks,3),linkedIns:textList(place.linkedIns,3),
+    tiktoks:textList(place.tiktoks,3),youtubes:textList(place.youtubes,3),
+    openingHours:Array.isArray((place as any).openingHours)?(place as any).openingHours.slice(0,7).map((v:any)=>({day:cleanText(v.day,30),hours:cleanText(v.hours,100)})):[],
+    reviews:Array.isArray((place as any).reviews)?(place as any).reviews.slice(0,5).map((v:any)=>({text:cleanText(v.text,1200),stars:typeof v.stars==='number'?v.stars:null,publishedAtDate:cleanText(v.publishedAtDate,40)})):[],
+    location:place.location && Number.isFinite(place.location.lat)&&Number.isFinite(place.location.lng)?{lat:place.location.lat,lng:place.location.lng}:null};
+  // Bound UTF-8 storage even for long multilingual descriptions and review samples.
+  if(JSON.stringify(snapshot).length>6000){
+    snapshot.reviews=[];snapshot.description='';
+    snapshot.emails=snapshot.emails.slice(0,1);snapshot.openingHours=[];
+    snapshot.instagrams=[];snapshot.facebooks=[];snapshot.linkedIns=[];snapshot.tiktoks=[];snapshot.youtubes=[];
+  }
+  if(JSON.stringify(snapshot).length>6000){snapshot.emails=[];}
+  return snapshot;
+}
+function radarAnalysis(place: ApifyPlace, run: any, offers: Offer[], collectedAt: string) {
+  const name=cleanText(place.title),sourceUrl=place.url||null;
+  const placeId=cleanText(place.placeId||place.cid||place.url||`${name}-${place.address}`,300);
+  const signals: string[]=[];if(!place.website)signals.push('semSite');if(!place.phone)signals.push('semWhats');
+  const matches=offers.map(offer=>matchOffer(place,signals,offer)).sort((a,b)=>b.compatibility-a.compatibility);
+  const recommendation=matches.find(match=>match.compatibility>0),score=scorePlace(place,recommendation?.compatibility??null);
+  const company={user_id:run.user_id,radar_id:run.radar_id,source_provider:'google_maps',source_place_id:placeId,source_url:sourceUrl,
+    source_payload:place,google_place_id:place.placeId||null,google_maps_url:sourceUrl,dados_google:place,nome:name,
+    segmento:place.categoryName||place.categories?.[0]||null,cidade:place.city||null,endereco:place.address||null,telefone:place.phone||null,site:place.website||null,
+    nota:score.rating||null,avaliacoes:place.reviewsCount??null,score:score.total,confianca:score.confidence>=13?'Alta':score.confidence>=9?'Média':'Baixa',
+    potencial:score.total>=70?'alto':score.total>=45?'medio':'baixo',ultima_atualizacao:collectedAt.slice(0,10),servico_recomendado:recommendation?.offer.nome||null,sinais_keys:signals,
+    business_status:place.temporarilyClosed?'CLOSED_TEMPORARILY':'OPERATIONAL',latitude:place.location?.lat??null,longitude:place.location?.lng??null,coletado_em:collectedAt,analisado_em:collectedAt};
+  const components=[
+    ['Perfil comercial público',score.profile,10,'Completude pública do estabelecimento.'],
+    ['Compatibilidade com a oferta',score.compatibility,60,recommendation?.reason||'Sem correspondência; validar em conversa.'],
+    ['Reputação',score.reputation,5,'Nota e avaliações não comprovam faturamento.'],
+    ['Contato',score.contact,10,'Canais públicos encontrados.'],
+    ['Confiança',score.confidence,15,'Cobertura dos campos públicos.']
+  ].map(([dimensao,pontos,maximo,explicacao])=>({dimensao,pontos,maximo,explicacao}));
+  const channels: any[]=[];
+  if(sourceUrl)channels.push({tipo:'google_maps',valor:sourceUrl,url:sourceUrl,principal:true});
+  if(place.website)channels.push({tipo:'site',valor:place.website,url:place.website,principal:!sourceUrl});
+  if(place.phone)channels.push({tipo:'telefone',valor:place.phone,url:null,principal:!sourceUrl&&!place.website});
+  for(const [key,type] of [['emails','email'],['instagrams','instagram'],['facebooks','facebook'],['linkedIns','linkedin'],['tiktoks','tiktok'],['youtubes','outro']]){
+    for(const value of (place as any)[key]||[])channels.push({tipo:type,valor:value,url:type==='email'?'mailto:'+value:value,principal:false});
+  }
+  const evidence=[];
+  if(!place.website)evidence.push({texto:'Site não encontrado no perfil comercial público.'});
+  if(!place.phone)evidence.push({texto:'Telefone não informado no perfil comercial público.'});
+  if(score.rating)evidence.push({texto:`Nota pública ${score.rating.toFixed(1)} de 5 com ${place.reviewsCount??'quantidade não informada de'} avaliações.`});
+  return {company,matches:matches.map((m,i)=>({offer_id:m.offer.id,compatibilidade:m.compatibility,motivo:m.reason,principal:i===0&&m.compatibility>0})),components,channels,evidence};
+}
 async function savePlaces(ctx: any, run: any, places: ApifyPlace[]) {
-  const saved = [];
-  const excluded = Array.isArray(run.provider_payload?.enrichment?.exclude_terms) ? run.provider_payload.enrichment.exclude_terms : [];
-  const seen = new Set<string>();
-  const collectedAt = new Date().toISOString();
-  const offers = await radarOffers(ctx, run.radar_id);
-
-  for (const place of places.slice(0, run.limite_resultados)) {
-    const name = cleanText(place.title);
-    const placeId = cleanText(place.placeId || place.cid || place.url || `${name}-${place.address}`, 300);
-    if (!placeId || !name || place.permanentlyClosed) continue;
-    if (!matchesReputation(place, run.provider_payload?.enrichment)) continue;
-    const activity = normalizeText([place.title, place.description, place.categoryName, ...(place.categories ?? [])].join(' '));
-    if (excluded.some((term: string) => activity.includes(normalizeText(term))) || seen.has(placeId)) continue;
-    seen.add(placeId);
-
-    const signals: string[] = [];
-    if (!place.website) signals.push("semSite");
-    if (!place.phone) signals.push("semWhats");
-    const sourceUrl = place.url ?? null;
-    const offerMatches = offers.map((offer) => matchOffer(place, signals, offer)).sort((a, b) => b.compatibility - a.compatibility);
-    const recommendation = offerMatches.find(match => match.compatibility > 0);
-    const score = scorePlace(place, recommendation?.compatibility ?? null);
-    const potential = score.total >= 70 ? "alto" : score.total >= 45 ? "medio" : "baixo";
-    const confidence = score.confidence >= 13 ? "Alta" : score.confidence >= 9 ? "Média" : "Baixa";
-
-    const { data: company, error: companyError } = await ctx.supabase.rpc("save_company_collection", { p_payload: {
-      user_id: run.user_id,
-      radar_id: run.radar_id,
-      source_provider: "google_maps",
-      source_place_id: placeId,
-      source_url: sourceUrl,
-      source_payload: place,
-      google_place_id: place.placeId ?? null,
-      google_maps_url: sourceUrl,
-      dados_google: place,
-      nome: name,
-      segmento: place.categoryName ?? place.categories?.[0] ?? run.consulta,
-      cidade: place.city || null,
-      endereco: place.address ?? null,
-      telefone: place.phone ?? null,
-      site: place.website ?? null,
-      nota: score.rating || null,
-      avaliacoes: score.reviews,
-      score: score.total,
-      confianca: confidence,
-      potencial: potential,
-      ultima_atualizacao: collectedAt.slice(0, 10),
-      servico_recomendado: recommendation?.offer.nome ?? null,
-      sinais_keys: signals,
-      business_status: place.temporarilyClosed ? "CLOSED_TEMPORARILY" : "OPERATIONAL",
-      latitude: place.location?.lat ?? null,
-      longitude: place.location?.lng ?? null,
-      coletado_em: collectedAt,
-      analisado_em: collectedAt,
-    } }).single();
-    if (companyError) throw companyError;
-
-    if (offerMatches.length) {
-      const { error: matchError } = await ctx.supabase.from("company_offer_matches").insert(offerMatches.map((match, index) => ({
-        user_id: run.user_id, empresa_id: company.id, radar_id: run.radar_id, offer_id: match.offer.id,
-        compatibilidade: match.compatibility, motivo: match.reason, principal: index === 0, analysis_batch: collectedAt,
-      })));
-      if (matchError) throw matchError;
+  const saved: any[]=[];
+  const offers=await radarOffers(ctx,run.radar_id),collectedAt=new Date().toISOString();
+  for(let index=0;index<places.length;index++){
+    const original=places[index]&&typeof places[index]==='object'?places[index]:{};
+    const snapshot=radarSnapshot(original);
+    const evaluation=evaluateRadarPlace(original,run.provider_payload?.enrichment||{});
+    const entry={...evaluation,snapshot,analysis:radarAnalysis(snapshot as ApifyPlace,run,offers,collectedAt)};
+    let {data,error}=await ctx.supabase.rpc('persist_radar_result',{p_run:run.id,p_index:index,p_entry:entry});
+    if(error){
+      // The failed item transaction rolls back; preserve a separate, safe error result.
+      const failure=await ctx.supabase.rpc('persist_radar_result',{p_run:run.id,p_index:index,p_entry:{...entry,decision:'error',reasons:['persistence_error']}});
+      if(failure.error)throw failure.error;
+      data=failure.data;
     }
-
-    const { error: scoreError } = await ctx.supabase.from("score_components").insert([
-      ["Perfil comercial público", score.profile, 10, "Completude e situação pública do estabelecimento na fonte consultada."],
-      ["Compatibilidade com a oferta", score.compatibility, 60, recommendation ? recommendation.reason : "Nenhuma correspondência com uma oferta foi identificada; valide em conversa."],
-      ["Reputação", score.reputation, 5, "Nota e volume de avaliações, sem inferir faturamento ou orçamento."],
-      ["Contato", score.contact, 10, "Canais públicos de contato encontrados."],
-      ["Confiança", score.confidence, 15, "Quantidade de campos públicos verificáveis coletados."],
-    ].map(([dimensao, pontos, maximo, explicacao]) => ({
-      user_id: run.user_id, empresa_id: company.id, radar_run_id: run.id,
-      versao_modelo: "erp-public-fit-v4", dimensao, pontos, maximo, explicacao, calculado_em: collectedAt,
-    })));
-    if (scoreError) throw scoreError;
-
-    const channels: Array<{ tipo: string; valor: string; url: string | null; principal: boolean }> = [];
-    if (sourceUrl) channels.push({ tipo: "google_maps", valor: sourceUrl, url: sourceUrl, principal: true });
-    if (place.website) channels.push({ tipo: "site", valor: place.website, url: place.website, principal: !sourceUrl });
-    if (place.phone) channels.push({ tipo: "telefone", valor: place.phone, url: null, principal: !sourceUrl && !place.website });
-    for (const email of place.emails ?? []) channels.push({ tipo: "email", valor: email, url: `mailto:${email}`, principal: false });
-    for (const url of place.instagrams ?? []) channels.push({ tipo: "instagram", valor: url, url, principal: false });
-    for (const url of place.facebooks ?? []) channels.push({ tipo: "facebook", valor: url, url, principal: false });
-    for (const url of place.linkedIns ?? []) channels.push({ tipo: "linkedin", valor: url, url, principal: false });
-    for (const url of place.tiktoks ?? []) channels.push({ tipo: "tiktok", valor: url, url, principal: false });
-    for (const url of place.youtubes ?? []) channels.push({ tipo: "outro", valor: url, url, principal: false });
-    if (channels.length) {
-      const { error: channelError } = await ctx.supabase.from("company_channels").upsert(
-        channels.map((channel) => ({ ...channel, user_id: run.user_id, empresa_id: company.id, fonte: PROVIDER, verificado_em: collectedAt })),
-        { onConflict: "empresa_id,tipo,valor" },
-      );
-      if (channelError) throw channelError;
-    }
-
-    const evidence = [];
-    if (!place.website) evidence.push({ texto: "Site não encontrado no perfil comercial público.", fonte: "Perfil comercial público", confianca: "Alta" });
-    if (!place.phone) evidence.push({ texto: "Telefone não informado no perfil comercial público.", fonte: "Perfil comercial público", confianca: "Alta" });
-    if (score.rating) evidence.push({ texto: `Nota pública ${score.rating.toFixed(1)} de 5 com ${score.reviews} avaliações.`, fonte: "Perfil comercial público", confianca: "Alta" });
-    await ctx.supabase.from("evidencias").delete().eq("empresa_id", company.id).eq("tipo_fonte", PROVIDER);
-    if (evidence.length) {
-      const { error: evidenceError } = await ctx.supabase.from("evidencias").insert(evidence.map((item) => ({
-        ...item, empresa_id: company.id, data: collectedAt.slice(0, 10), tipo_fonte: PROVIDER,
-        url_fonte: sourceUrl, coletado_em: collectedAt, metadata: { provider: "apify", actor: APIFY_ACTOR },
-      })));
-      if (evidenceError) throw evidenceError;
-    }
-    saved.push(company);
+    if(data?.company_id)saved.push({id:data.company_id});
   }
   return saved;
 }
@@ -275,6 +265,7 @@ export default {
     let radarId: string | null = null;
     try {
       const body = await req.json();
+      if(body.action==='capabilities')return Response.json({research_version:1});
       const action = body.action === "status" ? "status" : "start";
       const userId = await accountId(ctx);
       if (!userId) return Response.json({ error: "Não foi possível identificar o usuário autenticado." }, { status: 401 });
@@ -289,7 +280,7 @@ export default {
         const location = cleanText(body.location);
         const limit = Math.max(1, Math.min(20, Number(body.result_limit) || 20));
         let reputation;
-        try { reputation = validateReputationFilters(body.enrichment); }
+        try { reputation = validateRadarCriteria(body.enrichment); }
         catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'Filtros inválidos.' }, { status: 400 }); }
         const enrichment = {
           ...reputation,
@@ -307,6 +298,8 @@ export default {
           area_scope: ['country', 'state', 'region'].includes(body.area_scope) ? body.area_scope : 'city',
         };
         if (!radarId || !query || !location) return Response.json({ error: "Radar, segmento e localização são obrigatórios." }, { status: 400 });
+        const {error: installationError}=await ctx.supabase.from('radar_results').select('id').limit(0);
+        if(installationError)return Response.json({error:'Aplique o SQL 05 de resultados das pesquisas antes de iniciar uma nova coleta.'},{status:503});
 
         const { data: radar, error: radarError } = await ctx.supabase.from("radares").select("id").eq("id", radarId).single();
         if (radarError || !radar) return Response.json({ error: "Radar não encontrado." }, { status: 404 });
@@ -322,7 +315,7 @@ export default {
           method: "POST",
           body: JSON.stringify({
             searchStringsArray: queries, locationQuery: location, maxCrawledPlacesPerSearch: limit,
-            language: "pt-BR", skipClosedPlaces: true, scrapePlaceDetailPage: true,
+            language: "pt-BR", skipClosedPlaces: false, scrapePlaceDetailPage: true,
             maxReviews: enrichment.review_limit, reviewsSort: "newest", reviewsOrigin: "google", scrapeReviewsPersonalData: false,
             maxImages: 0, scrapeContacts: enrichment.contacts,
             scrapeSocialMediaProfiles: {
@@ -370,9 +363,13 @@ export default {
 
       const datasetId = providerRun?.defaultDatasetId || run.provider_dataset_id;
       if (!datasetId) throw new Error("A coleta foi concluída sem disponibilizar o conjunto de resultados.");
+      const {data:claimed,error:claimError}=await ctx.supabase.rpc('claim_radar_run',{p_run:runId});
+      if(claimError)throw claimError;
+      if(!claimed)return Response.json({status:'processando',run_id:runId},{status:202});
       await ctx.supabase.from("radar_runs").update({ provider_status: "SAVING" }).eq("id", runId);
       const places = await apifyRequest(`datasets/${datasetId}/items?clean=true&format=json`, token);
       if (!Array.isArray(places)) throw new Error("A fonte pública retornou um formato de resultados inesperado.");
+      if(places.length>1000)throw new Error('A coleta ultrapassou o limite seguro de processamento. Nenhum resultado adicional foi descartado silenciosamente.');
       const saved = await savePlaces(ctx, run, places);
 
       const finishedAt = new Date().toISOString();

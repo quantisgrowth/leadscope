@@ -1,5 +1,9 @@
 # Instalação: histórico, pastas e convites
 
+## Nova atualização: pesquisas e dashboard
+
+Veja [Pesquisas rastreáveis e dashboard visual](PESQUISAS_E_DASHBOARD.md). Na conta que já tem SQLs 01–04, aplique **somente o SQL 05_radar_results.sql** e publique as funções pela Actions na main, confirmando também o novo campo de instalação do SQL 05. Não repita os SQLs antigos.
+
 ## Atualização de radar e ERP
 
 O novo radar, a ficha comercial e o score v4 estão descritos em [Qualificação para ERP](QUALIFICACAO_ERP.md). Para habilitar o salvamento da ficha, aplique somente o SQL 04 após os SQLs anteriores e publique novamente as funções pelo fluxo manual. Não repita os SQLs 01–03.

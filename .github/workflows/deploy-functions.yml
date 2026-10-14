@@ -8,6 +8,11 @@ on:
         required: true
         type: boolean
         default: false
+      research_sql_applied:
+        description: O SQL 05_radar_results.sql já foi aplicado com sucesso?
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,9 +29,10 @@ jobs:
       - name: Conferir confirmação e branch
         env:
           SQLS_APPLIED: ${{ inputs.sqls_applied }}
+          RESEARCH_SQL_APPLIED: ${{ inputs.research_sql_applied }}
         run: |
-          if [ "$SQLS_APPLIED" != "true" ] || [ "$GITHUB_REF" != "refs/heads/main" ]; then
-            echo "Execute apenas na main, após aplicar os três SQLs com sucesso."
+          if [ "$SQLS_APPLIED" != "true" ] || [ "$RESEARCH_SQL_APPLIED" != "true" ] || [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Execute apenas na main, após aplicar os SQLs de instalação e o SQL 05 com sucesso."
             exit 1
           fi
       - uses: actions/checkout@v4
@@ -46,6 +52,7 @@ jobs:
           node tests/dashboard.mjs
           node tests/erp-qualification.mjs
           node tests/radar-location.mjs
+          node tests/radar-results.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 2.119.0

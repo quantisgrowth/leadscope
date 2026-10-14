@@ -1,0 +1,150 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import {stripTypeScriptTypes} from 'node:module';
+const read=p=>fs.readFileSync(new URL('../'+p,import.meta.url),'utf8');
+const ctx=vm.createContext({Response,withSupabase:()=>{},console});
+vm.runInContext(stripTypeScriptTypes(read('supabase/functions/search-places/index.ts').replace(/^import .+;\n/gm,'')).replace('export default','const handler='),ctx);
+const place={placeId:'abc',title:'Locadora',categoryName:'Empresa de Terraplenagem',totalScore:4.5,reviewsCount:11};
+let criteria=ctx.validateRadarCriteria({categories:['Empresa de Terraplenagem'],category_mode:'required',min_reviews:11,min_rating:4.5});
+assert.equal(ctx.evaluateRadarPlace(place,criteria).decision,'accepted');
+assert.equal(ctx.evaluateRadarPlace({...place,reviewsCount:10},criteria).decision,'discarded');
+assert.equal(ctx.evaluateRadarPlace({...place,reviewsCount:null},criteria).unknowns[0],'min_reviews');
+criteria.min_reviews_mode='preferred';assert.equal(ctx.evaluateRadarPlace({...place,reviewsCount:1},criteria).decision,'accepted');
+assert.equal(ctx.evaluateRadarPlace(place,criteria).preferences[0],'min_reviews');
+assert.equal(ctx.evaluateRadarPlace({...place,categoryName:'Odontologia'},criteria).decision,'discarded');
+assert.equal(ctx.evaluateRadarPlace({...place,categoryName:'empresa de terraplenagem'},criteria).decision,'accepted');
+assert.equal(ctx.evaluateRadarPlace({...place,categories:'bad'},criteria).decision,'accepted');
+assert.equal(ctx.evaluateRadarPlace({...place,permanentlyClosed:true},criteria).decision,'discarded');
+assert.equal(ctx.evaluateRadarPlace(place,{exclude_terms:['locadora']}).decision,'discarded');
+assert.throws(()=>ctx.validateRadarCriteria({category_mode:'nonsense'}));
+assert.equal(ctx.radarSnapshot({...place,reviews:[{text:'Bom',name:'Private reviewer',stars:5}]}).reviews[0].name,undefined);
+const long=ctx.radarSnapshot({...place,title:'界'.repeat(500),description:'界'.repeat(2000),categories:Array(10).fill('界'.repeat(400)),reviews:Array(5).fill({text:'界'.repeat(2000)})});
+assert.ok(Buffer.byteLength(JSON.stringify(long),'utf8')<=20000,'Public snapshots must fit storage limits in UTF-8');
+let providerCalls=0;
+const handlerContext=vm.createContext({Response,console,withSupabase:(_options,handler)=>handler,accountId:async()=> 'owner',Deno:{env:{get:()=> 'test-only-token'}},fetch:async()=>{providerCalls++;throw Error('Provider must not be called');}});
+vm.runInContext(stripTypeScriptTypes(read('supabase/functions/search-places/index.ts').replace(/^import .+;\n/gm,'')).replace('export default','const api='),handlerContext);
+const invoke=(body,context={})=>{handlerContext.requestBody=body;handlerContext.requestContext=context;return vm.runInContext("api.fetch({method:'POST',json:async()=>requestBody},requestContext)",handlerContext);};
+assert.equal((await (await invoke({action:'capabilities'})).json()).research_version,1);
+const missingSchema={supabase:{from:()=>({select:()=>({limit:async()=>({error:{message:'missing table'}})})})}};
+assert.equal((await invoke({action:'start',radar_id:'radar',queries:['Locadora'],location:'Brasil'},missingSchema)).status,503);
+assert.equal((await invoke({action:'start',enrichment:{min_reviews:-1}},missingSchema)).status,400);
+assert.equal(providerCalls,0,'Capabilities, missing SQL and invalid filters cannot start paid collection');
+for(const file of ['radar-workflow.js','approach.js','dashboard.js'])new vm.Script(read(file));
+const messages=vm.createContext({Map});vm.runInContext(read('approach.js'),messages);
+const c={id:'c',nome:'ABC',segmento:'Locadora',qualification:{need:'Organizar contratos'},offerRecommendation:{offer:{nome:'ERP',resultado:'Gerir ordens de serviço'}}};
+assert.notEqual(messages.approachTemplates(c,0).direto,messages.approachTemplates(c,1).direto);
+assert.ok(messages.approachTemplates(c).direto.includes('Organizar contratos'));
+assert.ok(!messages.approachTemplates({...c,siteAudit:{status:'falhou',metrics:{operational_signals:[{label:'Suposto problema'}]}}}).direto.includes('Suposto problema'));
+console.log('Research: required/preferred/unknown categories and reviews, excluded activities, reviewer minimization and distinct non-AI message variants passed.');
+
+if(process.env.LEADSCOPE_BROWSER_QA){
+  const {chromium}=await import(process.env.LEADSCOPE_PLAYWRIGHT),browser=await chromium.launch({headless:true,executablePath:process.env.LEADSCOPE_CHROME});
+  const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const html=read('index.html'),inline=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const radar=inline.slice(inline.indexOf('function renderRadar(){'),inline.indexOf('\nfunction bindRadarProcessing(){'));
+  const paging=inline.slice(inline.indexOf('async function readAllRows('),inline.indexOf('async function loadAllData('));
+  const fixtureCompany={id:'company-a',nome:'Locadora de máquinas',segmento:'Locadora',mensagemGerada:'',mensagemTom:'direto',qualification:{need:'Contratos'}};
+  const results=[{id:'r1',run_id:'run',item_index:0,decision:'accepted',reasons:[],preferences:['category'],snapshot:{title:'Locadora de máquinas',categoryName:'Locadora',totalScore:4.5,reviewsCount:20},company_id:'company-a'},
+    {id:'r2',run_id:'run',item_index:1,decision:'discarded',reasons:['min_reviews'],preferences:[],unknowns:[],snapshot:{title:'Empresa <script> teste',categoryName:'Outra',totalScore:4.9,reviewsCount:3}},
+    {id:'r3',run_id:'run',item_index:2,decision:'error',reasons:['persistence_error'],preferences:[],snapshot:{title:'Perfil com erro'}}];
+  const boot=`const state={userId:'owner',authUserId:'owner',readOnly:false,diagTone:'direto',companies:[${JSON.stringify(fixtureCompany)}],onboarding:{segmentosDesejados:'Locadora',regiao:'Brasil',palavrasChave:'',qtdOportunidades:'5'},offers:[{id:'offer',nome:'ERP',publicoAlvo:'Locadoras',resultado:'Gerir contratos',ativo:true,etapa:'principal'}],radars:[]};
+    let currentDiagId='company-a',radarCategories=['Locadora'],radarOfferIds=['offer'];const OFFER_STAGES=[{key:'principal',label:'Oferta principal'}];
+    const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),fmtDateTime=s=>String(s),formatOfferPrice=()=> 'Sob consulta',icon=()=>'',toast=()=>{};let navigated='';function navigate(path){navigated=path;}async function loadAllData(){};
+    const rows=${JSON.stringify(results)},versions=[],runs=[{id:'run',consulta:'Locadora',localizacao:'Brasil',iniciado_em:'2026-10-14',status:'concluido',limite_resultados:5,provider_payload:{enrichment:{min_reviews:11,min_rating:4.5}}}];let failMessage=false;
+    const sb={from(table){const filters=[];const query={select(){return query},eq(k,v){filters.push([k,v]);return query},order(){return query},limit(){return query},then(resolve){const data=(table==='radar_runs'?runs:table==='radar_results'?rows:versions).filter(x=>filters.every(([k,v])=>x[k]===undefined||x[k]===v));return Promise.resolve({data,error:null}).then(resolve)},range(from,to){const data=table==='radar_runs'?runs:[];return Promise.resolve({data:data.slice(from,to+1),error:null});}};return query;},async rpc(name,args){if(name==='recover_radar_result'){Object.assign(rows.find(x=>x.id===args.p_result),{reviewed_at:'now',recovered_company_id:'company-a'});return {data:'company-a'};}if(name==='save_approach_message'){if(failMessage)return {error:{message:'Conflito de edição'}};versions.unshift({id:'v',empresa_id:'company-a',body:args.p_text,tone:args.p_tone,origin:args.p_origin,used:args.p_used,captured_at:'now'});return {error:null};}}};
+    ${read('radar-location.js')}${read('radar-workflow.js')}${read('erp.js')}${read('approach.js')}${paging}${radar}
+    function render(view='radar'){document.getElementById('root').innerHTML=view==='radar'?renderRadar():'<div class="card"><div id="msgBox" contenteditable="true">'+esc(approachMessage(state.companies[0],state.diagTone))+'</div><button class="btn" id="saveMsg">Salvar versão</button><details id="approachVersions"><summary>Versões</summary><div id="approachHistory"></div></details></div>';if(view==='radar')bindRadarErpOptions();else bindApproach();}render();`;
+  const fixture='<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+html.match(/<style>[\s\S]*?<\/style>/)[0]+'</head><body><main id="root" style="padding:20px"></main><script>'+boot+'</script></body></html>';
+  await page.route('**/*',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:fixture}));await page.goto('http://localhost:43132');
+  for(const width of [1440,390]){
+    await page.setViewportSize({width,height:950});await page.evaluate(()=>render());
+    await page.locator('#radarRunSelect').waitFor();assert.equal(await page.locator('#runRadar').isVisible(),false);
+    await page.locator('#radarNext').click();assert.equal(await page.locator('#rCountry').isVisible(),true);
+    await page.locator('#radarNext').click();await page.locator('#rMinReviews').fill('11');await page.locator('#rMinRating').selectOption('4.5');await page.locator('#rReviewsMode').selectOption('preferred');
+    await page.locator('#radarNext').click();assert.equal(await page.locator('#runRadar').isVisible(),true);assert.ok((await page.locator('#radarReview').innerText()).includes('Preferência'));
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:'/tmp/leadscope-radar-review-'+width+'.png',fullPage:width>900});
+    await page.locator('#radarResultDecision').selectOption('discarded');assert.equal(await page.locator('[data-recover-result]').count(),1);
+    assert.equal(await page.locator('#radarResultRows script').count(),0,'Public text must be escaped');
+    await page.locator('#radarResultSearch').fill('Inexistente');assert.ok((await page.locator('#radarResultRows').innerText()).includes('Nenhum resultado'));
+    await page.locator('#radarResultSearch').fill('');
+  }
+  await page.locator('[data-recover-result]').click();await page.getByText('Aproveitada após revisão',{exact:true}).waitFor();assert.equal(await page.evaluate(()=>rows[1].decision),'discarded');
+  await page.evaluate(()=>{rows[1].reviewed_at=null;rows[1].recovered_company_id=null;state.readOnly=true;paintRadarResults();});assert.equal(await page.locator('[data-recover-result]').count(),0);
+  await page.evaluate(()=>{state.readOnly=false;render('message');});await page.locator('#msgBox').fill('Mensagem editada');await page.locator('#saveMsg').click();
+  assert.equal(await page.evaluate(()=>versions[0].origin),'edited');assert.equal(await page.evaluate(()=>state.companies[0].mensagemGerada),'Mensagem editada');
+  await page.locator('#approachVersions summary').click();assert.ok((await page.locator('#approachHistory').innerText()).includes('Mensagem editada'));
+  await page.evaluate(()=>{failMessage=true;});await page.locator('#msgBox').fill('Não salva');await page.locator('#saveMsg').click();assert.equal(await page.evaluate(()=>state.companies[0].mensagemGerada),'Mensagem editada');
+  await page.evaluate(()=>{state.readOnly=true;render('message');});assert.equal(await page.locator('#saveMsg').isEnabled(),false);assert.equal(await page.locator('#msgBox').getAttribute('contenteditable'),'false');
+  assert.deepEqual(errors,[]);await browser.close();console.log('Browser research QA: four-step review, thresholds/preferences, escaped history, filtering, recovery, read-only, version save/conflict and responsive layout passed.');
+}
+
+if(process.env.LEADSCOPE_PGLITE){
+  const {PGlite}=await import(process.env.LEADSCOPE_PGLITE),db=new PGlite();
+  const owner='00000000-0000-0000-0000-000000000001',other='00000000-0000-0000-0000-000000000002',run='10000000-0000-0000-0000-000000000001',radar='20000000-0000-0000-0000-000000000001';
+  await db.exec(`create role authenticated;create role anon;create role service_role;create schema auth;create schema leadscope_private;
+    create table auth.users(id uuid primary key);insert into auth.users values('${owner}'),('${other}');
+    create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('test.uid',true),'')::uuid$$;
+    create function public.current_account_id() returns uuid language sql stable as $$select coalesce(nullif(current_setting('test.account',true),'')::uuid,auth.uid())$$;
+    create function public.current_account_can_write() returns boolean language sql stable as $$select coalesce(current_setting('test.write',true),'false')='true'$$;
+    grant usage on schema public,auth,leadscope_private to authenticated;grant execute on function auth.uid() to authenticated;`);
+  for(const ddl of read('schema.sql').matchAll(/create table if not exists public\.[\s\S]*?\n\);/g))await db.exec(ddl[0]);
+  await db.exec(read('supabase/migrations/20260928223307_leadscope_v2_foundation.sql'));
+  await db.exec(`alter table public.empresas add column source_provider text,add column source_place_id text,add column source_url text,add column source_payload jsonb default '{}',add column archived_at timestamptz,add column cnpj text,add column analisado_em timestamptz;
+    create table public.company_offer_matches(id uuid primary key default gen_random_uuid(),user_id uuid,empresa_id uuid,radar_id uuid,offer_id uuid,compatibilidade int,motivo text,principal boolean,created_at timestamptz default now());
+    create table public.opportunity_folder_companies(user_id uuid,folder_id uuid,empresa_id uuid,unique(folder_id,empresa_id));
+    create table public.radar_offers(user_id uuid,radar_id uuid,offer_id uuid);
+    grant select,insert,update on public.company_offer_matches,public.opportunity_folder_companies,public.radar_offers to authenticated;
+    insert into public.radares(id,user_id,nome) values('${radar}','${owner}','Teste');
+    insert into public.radar_runs(id,user_id,radar_id,consulta,localizacao) values('${run}','${owner}','${radar}','Locadora','Brasil');`);
+  await db.exec(read('supabase/manual/01_history_and_collection.sql'));
+  await db.exec(read('supabase/manual/04_erp_qualification.sql'));
+  // Isolated helper fixtures reproduce team scoping without touching real Auth.
+  for(const table of ['empresas','radares','radar_runs','offers','score_components','company_offer_matches','company_channels','company_radar_history','company_versions','radar_offers']){
+    await db.exec(`alter table public.${table} enable row level security;
+      create policy fixture_read on public.${table} for select to authenticated using(user_id=public.current_account_id());
+      create policy fixture_insert on public.${table} for insert to authenticated with check(user_id=public.current_account_id() and public.current_account_can_write());
+      create policy fixture_update on public.${table} for update to authenticated using(user_id=public.current_account_id() and public.current_account_can_write()) with check(user_id=public.current_account_id() and public.current_account_can_write());`);
+  }
+  await db.exec(read('supabase/manual/05_radar_results.sql'));await db.exec(read('supabase/manual/05_radar_results.sql'));
+  await db.exec(`set role authenticated;set test.uid='${owner}';set test.write='true'`);
+  const analysis=ctx.radarAnalysis(place,{id:run,user_id:owner,radar_id:radar},[],'2026-10-14T15:00:00Z');
+  const entry={snapshot:place,decision:'accepted',reasons:[],analysis};
+  const persist=async(index,value)=>(await db.query('select public.persist_radar_result($1,$2,$3::jsonb) as value',[run,index,JSON.stringify(value)])).rows[0].value;
+  const accepted=await persist(0,entry);assert.equal(accepted.decision,'accepted');assert.ok(accepted.company_id);
+  const replay=await persist(0,{...entry,decision:'discarded'});assert.equal(replay.id,accepted.id);assert.equal(replay.decision,'accepted');
+  assert.equal((await db.query('select count(*)::int n from public.score_components')).rows[0].n,5,'Replay must not create another analysis');
+  await db.query("update public.empresas set status='Cliente',mensagem_gerada='Texto anterior' where id=$1",[accepted.company_id]);
+  const duplicate=await persist(1,entry);assert.equal(duplicate.decision,'duplicate');assert.equal(duplicate.company_id,accepted.company_id);
+  assert.equal((await db.query('select count(*)::int n from public.score_components')).rows[0].n,5,'Repeated place in the same dataset records an occurrence, not another analysis');
+  assert.equal((await db.query('select status from public.empresas where id=$1',[accepted.company_id])).rows[0].status,'Cliente');
+  const run2='10000000-0000-0000-0000-000000000002',radar2='20000000-0000-0000-0000-000000000002';
+  await db.query("update public.empresas set commercial_qualification=$2::jsonb where id=$1",[accepted.company_id,JSON.stringify({need:'Histórico comercial protegido'})]);
+  await db.exec(`insert into public.radares(id,user_id,nome) values('${radar2}','${owner}','Outra pesquisa');insert into public.radar_runs(id,user_id,radar_id,consulta,localizacao) values('${run2}','${owner}','${radar2}','Locação','Sorocaba');`);
+  const again=(await db.query('select public.persist_radar_result($1,0,$2::jsonb) value',[run2,JSON.stringify(entry)])).rows[0].value;
+  assert.equal(again.decision,'duplicate');assert.equal(again.company_id,accepted.company_id);
+  assert.equal((await db.query('select count(*)::int n from public.empresas')).rows[0].n,1,'Different radar reuses the same company');
+  assert.equal((await db.query('select count(*)::int n from public.company_radar_history')).rows[0].n,2,'Both radar links are preserved');
+  assert.equal((await db.query('select commercial_qualification from public.empresas')).rows[0].commercial_qualification.need,'Histórico comercial protegido');
+  const discarded=await persist(2,{...entry,decision:'discarded',reasons:['min_reviews']});
+  assert.equal(discarded.company_id,null);
+  const recover=async id=>(await db.query('select public.recover_radar_result($1) as id',[id])).rows[0].id;
+  assert.equal(await recover(discarded.id),accepted.company_id);assert.equal(await recover(discarded.id),accepted.company_id);
+  assert.equal((await db.query('select decision from public.radar_results where id=$1',[discarded.id])).rows[0].decision,'discarded');
+  await assert.rejects(()=>db.query("update public.radar_results set reviewed_by=auth.uid(),reviewed_at=now(),recovered_company_id=$1 where id=$2",[accepted.company_id,discarded.id]),/protegido/);
+  const closed=await persist(3,{...entry,decision:'discarded',reasons:['permanently_closed']});await assert.rejects(()=>recover(closed.id),/não pode/);
+  const broken={...entry,analysis:{...analysis,company:{...analysis.company,source_place_id:'new-failed',google_place_id:'new-failed'},components:[{dimensao:'Invalid',pontos:8,maximo:1,explicacao:'invalid'}]}};
+  await assert.rejects(()=>persist(4,broken));assert.equal((await db.query("select count(*)::int n from public.empresas where source_place_id='new-failed'")).rows[0].n,0,'Failed analysis must roll back the company');
+  assert.equal((await db.query('select count(*)::int n from public.radar_results where item_index=4')).rows[0].n,0);
+  await persist(4,{...broken,decision:'error',reasons:['persistence_error']});
+  const message=async(text,expected,used=false)=>db.query("select public.save_approach_message($1,$2,'direto','edited',$3,$4)",[accepted.company_id,text,used,expected]);
+  await message('Olá, equipe','Texto anterior');await assert.rejects(()=>message('Conflito','Texto anterior'),/Outra pessoa/);
+  assert.equal((await db.query('select count(*)::int n from public.approach_message_versions')).rows[0].n,2);
+  await message('Olá, equipe','Olá, equipe',true);await assert.rejects(()=>db.exec('delete from public.approach_message_versions'),/permission denied/);
+  await db.exec(`set test.write='false';set test.uid='${other}';set test.account='${owner}'`);
+  assert.ok((await db.query('select count(*)::int n from public.radar_results')).rows[0].n>0,'Viewer reads team results');
+  await assert.rejects(()=>persist(5,entry),/Sem permissão/);await assert.rejects(()=>message('X','Olá, equipe'),/Sem permissão/);
+  await db.exec(`set test.write='true';set test.account='${other}'`);assert.equal((await db.query('select count(*)::int n from public.radar_results')).rows[0].n,0);await assert.rejects(()=>persist(5,entry),/não encontrada/);
+  await db.exec('set role anon');await assert.rejects(()=>db.query('select * from public.radar_results'),/permission denied/);
+  await db.close();console.log('Real PostgreSQL SQL05: repeat install, atomic collection, idempotency, duplicate reuse, original decision, protected recovery, viewer/cross-account/anonymous isolation and message versions passed.');
+}
