@@ -1993,6 +1993,7 @@ function renderDiagnostico(){
   <div class="card" style="margin-bottom:18px;">
     <div class="card-title">Como abordar</div>
     <p class="card-sub">Modelo personalizado com os dados disponíveis — não gerado por IA. Revise antes de enviar.</p>
+    ${renderApproachOfferContext(c,tone)}
     <div class="tone-tabs">
       ${['direto','consultivo','informal'].map(t=>`<span class="pill ${tone===t?'active':''}" data-tone="${t}">${t==='direto'?'Direto':t==='consultivo'?'Consultivo':'Informal profissional'}</span>`).join('')}
     </div>
@@ -2319,8 +2320,8 @@ function bindDiagnostico(){
   });
   const regen = document.getElementById('regenMsg');
   if(regen) regen.addEventListener('click', ()=>{
-    const key=currentDiagId+'|'+state.diagTone;
-    approachVariants.set(key,(approachVariants.get(key)||0)+1);approachDrafts.delete(key);render();
+    const c=state.companies.find(x=>x.id===currentDiagId);
+    if(nextApproachSuggestion(c,state.diagTone))render();
   });
   const use = document.getElementById('useMsg');
   if(use) use.addEventListener('click', async ()=>{

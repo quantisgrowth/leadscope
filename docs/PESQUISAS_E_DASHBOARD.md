@@ -44,7 +44,9 @@ Indicadores comerciais contam empresas únicas; resultados de pesquisas contam o
 
 ## Como abordar
 
-Modelos determinísticos com três variações por tom, nome/segmento, produto e contexto disponível. Auditoria concluída pode fornecer uma menção operacional; qualificação manual pode fornecer a necessidade registrada. Não há IA nem envio automático.
+Modelos determinísticos com três variações por tom. Todas as nove sugestões incluem o nome da empresa, o produto associado ao diagnóstico e seu resultado cadastrado. A tela mostra o produto e o benefício usados como referência. Sem produto ativo ou resultado preenchido, não é gerada uma abordagem genérica: a tela orienta o preenchimento em Oferta comercial. Auditoria concluída pode fornecer uma menção relacionada ao produto; qualificação manual pode fornecer a necessidade registrada. Não há IA nem envio automático.
+
+Mensagens salvas e rascunhos não são substituídos automaticamente. Para renovar um texto antigo com a referência exibida, use **Outra sugestão do modelo** e depois **Salvar versão**. Esta melhoria do gerador é somente no frontend, sem SQL adicional ou nova publicação de funções.
 
 **Outra sugestão do modelo** varia o texto no mesmo tom. Edições ficam em rascunho durante a sessão. **Salvar versão** mantém texto, tom, origem (modelo/editada), autor e data. **Marcar como utilizada** também salva uma versão; não marca contato, envio ou resposta automaticamente. O primeiro salvamento preserva o texto anterior existente como “Texto anterior preservado”; sua data é a captura, não uma data de criação inventada. Conflitos entre editores não sobrescrevem a mensagem alheia. A tela mostra as últimas 20 versões; as demais permanecem no banco.
 

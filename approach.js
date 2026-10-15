@@ -1,20 +1,48 @@
 // Deterministic templates, not AI. No network calls or automatic sending.
 const approachDrafts=new Map(),approachVariants=new Map();
-function approachTemplates(c,variant=0){
-  const offer=c.offerRecommendation?.offer,q=c.qualification||{};
-  const result=String(offer?.resultado||'a organização da operação').replace(/[.]$/,'').toLowerCase();
-  const product=offer?.nome||'nossa solução';
-  const operation=(c.siteAudit?.status==='concluido'&&Array.isArray(c.siteAudit.metrics?.operational_signals)?c.siteAudit.metrics.operational_signals:[])[0]?.label;
-  const context=operation?`No site da ${c.nome}, encontrei uma menção a ${String(operation).toLowerCase()}.`:`Encontrei a ${c.nome} pesquisando empresas de ${c.segmento||'seu setor'}.`;
-  const question=q.need?`Podemos retomar o ponto registrado sobre ${String(q.need).slice(0,200).replace(/[.!?]$/,'')}?`:'Como vocês organizam contratos, ordens de serviço e acompanhamento da operação hoje?';
-  const options={
-    direto:[`${context} Trabalho com o ${product}, voltado a ${result}. ${question}`,`Olá! Tudo bem com a equipe da ${c.nome}? O ${product} tem como proposta ${result}. Posso fazer duas perguntas para entender se isso faz sentido para vocês?`,`${context} Antes de apresentar o ${product}, queria entender o cenário atual. ${question}`],
-    consultivo:[`${context} Queria entender como essa operação funciona na prática antes de sugerir qualquer solução. ${question}`,`Olá, equipe da ${c.nome}. A proposta do ${product} é ${result}. Os dados públicos não confirmam como vocês trabalham internamente. Podemos conversar para avaliar se existe encaixe?`,`${context} Estamos conversando com empresas do setor sobre ${result}. ${question}`],
-    informal:[`Oi, pessoal da ${c.nome}! ${context} Posso entender rapidinho como vocês organizam a operação hoje?`,`Olá! Trabalho com o ${product}. Em poucas palavras, a proposta é ${result}. Quem seria a melhor pessoa na ${c.nome} para conversar sobre isso?`,`Oi! ${context} Não quero presumir que vocês tenham um problema. ${question}`]
-  };
-  return Object.fromEntries(Object.entries(options).map(([tone,variants])=>[tone,variants[variant%variants.length]]));
+function approachOfferContext(c){
+  const offer=c.offerRecommendation?.offer;
+  const text=(value,max)=>String(value||'').replace(/\s+/g,' ').trim().slice(0,max).replace(/[.!?]+$/,'');
+  const product=text(offer?.nome,180),benefit=text(offer?.resultado,350);
+  return {offer,product,benefit,ready:!!(product&&benefit&&offer?.ativo!==false)};
 }
-function approachMessage(c,tone){const key=c.id+'|'+tone;return approachDrafts.get(key)?.text||((approachVariants.get(key)||0)===0&&c.mensagemTom===tone&&c.mensagemGerada?c.mensagemGerada:approachTemplates(c,approachVariants.get(key)||0)[tone]);}
+function renderApproachOfferContext(c,tone){
+  const info=approachOfferContext(c),key=c.id+'|'+tone;
+  const stored=approachDrafts.has(key)||(c.mensagemTom===tone&&c.mensagemGerada&&(approachVariants.get(key)||0)===0);
+  return `<div class="verification-note" style="margin-bottom:14px"><b>Produto de referência para novas sugestões: ${esc(info.product||'Nenhum produto associado')}</b>${info.benefit?`<p>Benefício cadastrado: ${esc(info.benefit)}</p>`:''}${!info.ready?`<p>${info.product?'Preencha o resultado que este produto entrega em Configurações › Oferta comercial.':'Associe uma oferta ao diagnóstico por uma pesquisa ou reanálise com o produto correto.'} Não geramos uma abordagem genérica para substituir esses dados.</p>`:''}${stored?'<p class="muted">Texto salvo ou rascunho preservado. “Outra sugestão do modelo” cria um novo texto com o produto acima; não altera o histórico.</p>':''}</div>`;
+}
+function approachTemplates(c,variant=0){
+  const {offer,product,benefit,ready}=approachOfferContext(c);
+  if(!ready)return {direto:'',consultivo:'',informal:''};
+  const company=String(c.nome||'sua empresa').trim().slice(0,180);
+  const q=c.qualification||{},need=String(q.need||'').replace(/\s+/g,' ').trim().slice(0,180).replace(/[.!?]+$/,'');
+  const words=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().split(/[^a-z0-9]+/).filter(word=>word.length>=4&&!['para','como','empresa','empresas','servico','servicos','produto','produtos','sistema','sistemas','gestao','solucao','operacao','site'].includes(word));
+  const productWords=new Set(words([product,benefit,offer.descricao,offer.publicoAlvo].join(' ')));
+  const signals=c.siteAudit?.status==='concluido'&&Array.isArray(c.siteAudit.metrics?.operational_signals)?c.siteAudit.metrics.operational_signals:[];
+  const operation=signals.find(signal=>words(signal?.label).some(word=>productWords.has(word)))?.label;
+  const context=operation?`Vi no site uma menção a ${String(operation).slice(0,120).toLowerCase()}. `:'';
+  const proposition=`A proposta do ${product} é: ${benefit}.`;
+  const question=need?`Faz sentido conversarmos sobre ${need}?`:'Esse resultado é uma prioridade para vocês hoje?';
+  const index=Number.isInteger(variant)&&variant>=0?variant%3:0;
+  const options={
+    direto:[`Olá, pessoal da ${company}! ${context}${proposition} ${question}`,
+      `Olá! Trabalho com o ${product} e gostaria de apresentá-lo à ${company}. A proposta é: ${benefit}. Posso enviar um resumo de como funciona para vocês avaliarem?`,
+      `Olá, equipe da ${company}. ${context}${proposition} Quem seria a pessoa indicada para avaliar se isso faz sentido para vocês?`],
+    consultivo:[`Olá, equipe da ${company}. ${context}${proposition} Antes de sugerir uma apresentação, gostaria de entender: ${question.charAt(0).toLowerCase()+question.slice(1)}`,
+      `Olá! Gostaria de avaliar se o ${product} faz sentido para a ${company}. O resultado proposto é: ${benefit}. Como vocês lidam com esse objetivo hoje?`,
+      `Olá, pessoal da ${company}. ${context}${proposition} Podemos conversar brevemente para avaliar a aplicação desse resultado ao cenário de vocês?`],
+    informal:[`Oi, pessoal da ${company}! Trabalho com o ${product}. A proposta é: ${benefit}. ${question}`,
+      `Oi! Tudo bem com a equipe da ${company}? ${context}${proposition} Posso te mandar um resumo e você me diz se vale conversarmos?`,
+      `Olá, pessoal da ${company}! Queria apresentar o ${product}, que tem esta proposta: ${benefit}. Quem por aí seria a melhor pessoa para avaliar isso com a gente?`]
+  };
+  return Object.fromEntries(Object.entries(options).map(([tone,variants])=>[tone,variants[index]]));
+}
+function approachMessage(c,tone){const key=c.id+'|'+tone;return approachDrafts.has(key)?approachDrafts.get(key).text:((approachVariants.get(key)||0)===0&&c.mensagemTom===tone&&c.mensagemGerada?c.mensagemGerada:approachTemplates(c,approachVariants.get(key)||0)[tone]);}
+function nextApproachSuggestion(c,tone){
+  if(!c||!approachOfferContext(c).ready)return false;
+  const key=c.id+'|'+tone;
+  approachVariants.set(key,(approachVariants.get(key)||0)+1);approachDrafts.delete(key);return true;
+}
 async function saveApproachVersion(used=false){
   if(state.readOnly)throw new Error('Seu acesso é somente leitura.');
   const c=state.companies.find(x=>x.id===currentDiagId),text=document.getElementById('msgBox').innerText.trim(),tone=state.diagTone;
@@ -31,6 +59,8 @@ async function loadApproachVersions(){
   }catch(e){if(host.isConnected)host.textContent='Histórico indisponível. Confira o SQL 05.';}
 }
 function bindApproach(){const box=document.getElementById('msgBox'),save=document.getElementById('saveMsg');if(!box)return;box.contentEditable=state.readOnly?'false':'true';box.oninput=()=>approachDrafts.set(currentDiagId+'|'+state.diagTone,{text:box.innerText});
+  const regen=document.getElementById('regenMsg'),company=state.companies.find(x=>x.id===currentDiagId);
+  if(regen&&company){regen.disabled=!approachOfferContext(company).ready;regen.title=regen.disabled?'Associe um produto e preencha seu resultado para gerar sugestões.':'Criar outra variação com o produto de referência, no mesmo tom';}
   if(save){save.disabled=!!state.readOnly;save.onclick=async()=>{save.disabled=true;try{await saveApproachVersion();toast('Versão salva no histórico.');}catch(e){toast(e.message);}finally{save.disabled=!!state.readOnly;}};}
   const details=document.getElementById('approachVersions');if(details)details.ontoggle=()=>{if(details.open)loadApproachVersions();};
 }
