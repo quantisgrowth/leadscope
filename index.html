@@ -322,6 +322,7 @@ tr.row-hover:hover{background:var(--hover);}
 <script src="radar-workflow.js"></script>
 <script src="erp.js"></script>
 <script src="approach.js"></script>
+<script src="approach-library.js"></script>
 <script>
 /* ================= CONFIG SUPABASE ================= */
 const SUPABASE_URL = "https://nlzlbrfwaloyxksaevne.supabase.co";
@@ -490,7 +491,7 @@ function rowToCompany(row, evidenciaRows, latestAudit, offerMatch, folderIds, of
   const auditChecks=completedAudit&&completedAudit.checks&&typeof completedAudit.checks==='object' ? completedAudit.checks : {};
   const auditMetrics=completedAudit&&completedAudit.metrics||{};
   return {
-    id:row.id, nome:row.nome, segmento:row.segmento, cidade:row.cidade, bairro:row.bairro, endereco:row.endereco,
+    id:row.id, radarId:row.radar_id, nome:row.nome, segmento:row.segmento, cidade:row.cidade, bairro:row.bairro, endereco:row.endereco,
     telefone:row.telefone, site:row.site, redes:row.redes||[], nota:row.nota, avaliacoes:row.avaliacoes,
     categorias:[...new Set([row.segmento,...collectedCategories].filter(Boolean))], sourcePayload,
     siteAudit:latestAudit||null,
@@ -730,7 +731,7 @@ const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows,e
     readAllRows(()=>sb.from('evidencias').select('*').order('data', {ascending:false}).order('id')),
     readAllRows(()=>sb.from('site_audits').select('*').eq('user_id', userId).order('created_at', {ascending:false}).order('id')),
     sb.from('offers').select('*').eq('user_id', userId).order('posicao', {ascending:true}),
-    sb.from('company_offer_matches').select('*,offer:offers(*)').eq('user_id', userId).order('created_at', {ascending:false}),
+    readAllRows(()=>sb.from('company_offer_matches').select('*,offer:offers(*)').eq('user_id', userId).order('created_at', {ascending:false}).order('id')),
     sb.from('opportunity_folders').select('*').eq('user_id', userId).order('updated_at', {ascending:false}),
     sb.from('opportunity_folder_companies').select('folder_id,empresa_id').eq('user_id', userId),
     readAllRows(()=>sb.from('company_status_history').select('empresa_id,status_anterior,status_novo,changed_by,changed_at').eq('user_id', userId).order('changed_at', {ascending:false}).order('id')),
@@ -764,6 +765,9 @@ const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows,e
   const historyByCompany={};
   (statusHistoryRows||[]).forEach(item=>{ (historyByCompany[item.empresa_id]=historyByCompany[item.empresa_id]||[]).push(item); });
   const companies = (empresasRows||[]).map(row => rowToCompany(row, evByEmpresa[row.id], latestAuditByEmpresa[row.id], matchByEmpresa[row.id], foldersByCompany[row.id], matchesByEmpresa[row.id], historyByCompany[row.id]));
+  const approachRadarsByCompany={};
+  (offerMatchRows||[]).forEach(m=>{if(m.radar_id)(approachRadarsByCompany[m.empresa_id]??=new Set()).add(m.radar_id);});
+  companies.forEach(c=>{c.approachRadarIds=[...(approachRadarsByCompany[c.id]||[])];});
   const scoresByCompany={};
   (scoreRows||[]).forEach(item=>{ (scoresByCompany[item.empresa_id]=scoresByCompany[item.empresa_id]||[]).push(item); });
   companies.forEach(company=>{
@@ -772,7 +776,13 @@ const [{data:profile}, {data:settings}, {data:radaresRows}, {data:empresasRows,e
     if(rows[0]?.calculado_em)company.analysisRecordedAt=rows[0].calculado_em;
   });
   const ob = rowToOnboarding(settings) || state.onboarding;
+  const [library,radarLibrary]=await Promise.all([
+    readAllRows(()=>sb.from('approach_models').select('*').eq('user_id',userId).order('updated_at',{ascending:false}).order('id')),
+    readAllRows(()=>sb.from('radar_approach_models').select('*').eq('user_id',userId).order('created_at',{ascending:false}).order('id')),
+  ]);
+  if(state.userId!==userId){librarySelections.clear();radarModelIds.clear();approachDrafts.clear();approachVariants.clear();}
   setState({
+    approachModels:library.data||[],radarApproaches:radarLibrary.data||[],approachLibraryReady:!library.error&&!radarLibrary.error,
     userId,authUserId:authId,isAccountOwner:userId===authId,readOnly:userId!==authId&&canWrite!==true,
     user: { nome: (profile&&profile.nome) || state.user.nome, empresa: ob.empresa || state.user.empresa,
       plano: (profile&&profile.plano) || 'Plano Piloto', email: (profile&&profile.email) || '',
@@ -1401,6 +1411,7 @@ function renderRadar(){
           </label>`).join('')}</div>`:`<div class="badge badge-gray" style="display:block;padding:10px 12px;">Cadastre produtos em Configurações › Oferta comercial antes de iniciar o radar.</div>`}
       </div>
       <div class="verification-note"><b>Perfil herdado dos produtos selecionados</b><p id="rIdealProfile"></p><span class="muted">Edite o público-alvo e resultado em Configurações › Oferta comercial.</span></div>
+      ${renderRadarModelPicker()}
       </section><section data-radar-step="1"><h3>Onde buscar</h3>${renderRadarLocation(ob.regiao)}</section>
       <section data-radar-step="2"><h3>Como aplicar os critérios</h3><p class="muted">Obrigatório exclui; preferência destaca. Categoria pesquisada e categoria encontrada são campos diferentes.</p>
       <div class="field"><label class="label" for="rCategoryMode">Categoria encontrada deve ser uma das categorias selecionadas?</label>${radarModeSelect('rCategoryMode','preferred')}<p class="muted">Compara o nome exato da categoria pública, ignorando acentos e maiúsculas. Termos livres como “terraplanagem” podem não ser a categoria oficial “Empresa de Terraplenagem”.</p></div>
@@ -1439,6 +1450,7 @@ function renderRadar(){
 function bindRadarProcessing(){
   bindRadarCategoryPicker();
   bindRadarErpOptions();
+  bindRadarModelPicker();
   document.querySelectorAll('[data-radar-offer]').forEach(input=>input.addEventListener('change',()=>{
     radarOfferIds=Array.from(document.querySelectorAll('[data-radar-offer]:checked')).map(item=>item.value);
   }));
@@ -1498,6 +1510,7 @@ function bindRadarProcessing(){
       if(radarError) throw radarError;
       const {error:offerLinkError}=await sb.from('radar_offers').insert(selectedOfferIds.map(offerId=>({radar_id:radar.id,offer_id:offerId,user_id:state.userId})));
       if(offerLinkError) throw offerLinkError;
+      await persistRadarModels(radar.id);
       const { data:startData, error:startError }=await sb.functions.invoke('search-places',{body:{action:'start',radar_id:radar.id,query:queries[0],queries,location:localizacao,result_limit:limite,enrichment,geography,area_scope:document.getElementById('rScope').value}});
       if(startError){
         let message=startError.message;
@@ -1994,6 +2007,7 @@ function renderDiagnostico(){
     <div class="card-title">Como abordar</div>
     <p class="card-sub">Modelo personalizado com os dados disponíveis — não gerado por IA. Revise antes de enviar.</p>
     ${renderApproachOfferContext(c,tone)}
+    ${renderLibraryPicker(c)}
     <div class="tone-tabs">
       ${['direto','consultivo','informal'].map(t=>`<span class="pill ${tone===t?'active':''}" data-tone="${t}">${t==='direto'?'Direto':t==='consultivo'?'Consultivo':'Informal profissional'}</span>`).join('')}
     </div>
@@ -2498,7 +2512,7 @@ function renderConfiguracoes(){
   const isPlatformAdmin=!!state.user.isPlatformAdmin;
   const requestedTab=state.configTab||'perfil';
   const tab=requestedTab==='integracoes'&&!isPlatformAdmin?'perfil':requestedTab;
-  const tabs=[['perfil','Perfil'],['aparencia','Aparência'],['empresa','Empresa'],['oferta','Oferta comercial'],['cliente','Cliente ideal'],['score','Critérios do score'],['usuarios','Usuários'],...(isPlatformAdmin?[['integracoes','Integrações']]:[]),['plano','Plano e uso'],['privacidade','Privacidade e bloqueios']];
+  const tabs=[['perfil','Perfil'],['aparencia','Aparência'],['empresa','Empresa'],['oferta','Oferta comercial'],['abordagens','Abordagens'],['cliente','Cliente ideal'],['score','Critérios do score'],['usuarios','Usuários'],...(isPlatformAdmin?[['integracoes','Integrações']]:[]),['plano','Plano e uso'],['privacidade','Privacidade e bloqueios']];
   let inner = '';
   if(tab==='perfil'){
     inner = `
@@ -2530,6 +2544,8 @@ function renderConfiguracoes(){
       <div class="field"><label class="label">Cidade e estado</label><input class="input" data-cfg="onboarding.cidade" value="${esc(ob.cidade)}"></div>`;
   } else if(tab==='oferta'){
     inner = renderOfferCatalog();
+  } else if(tab==='abordagens'){
+    inner = renderApproachLibrary();
   } else if(tab==='cliente'){
     inner = `
       <div class="field"><label class="label">Segmentos desejados</label><input class="input" data-cfg="onboarding.segmentosDesejados" value="${esc(ob.segmentosDesejados)}"></div>
@@ -2577,7 +2593,7 @@ function renderConfiguracoes(){
       ${tabs.map(([k,l])=>`<div class="nav-item" style="padding:9px 14px;border-radius:8px;" data-configtab="${k}" data-active="${tab===k}">${l}</div>`).join('')}
     </div>
     <div class="card">${inner}
-      ${tab==='oferta'||tab==='aparencia'?'':`<div class="divider"></div><button class="btn btn-primary" id="saveConfig">Salvar alterações</button>`}
+      ${['oferta','aparencia','abordagens'].includes(tab)?'':`<div class="divider"></div><button class="btn btn-primary" id="saveConfig">Salvar alterações</button>`}
     </div>
   </div>`;
 }
@@ -2808,6 +2824,7 @@ function bindResultados(){
   });
 }
 function bindConfiguracoes(){
+  bindApproachLibrary();
   const inviteButtons=['createTeamInviteLink','sendTeamInvite'].map(id=>document.getElementById(id)).filter(Boolean);
   inviteButtons.forEach(invite=>invite.onclick=async()=>{
     inviteButtons.forEach(button=>button.disabled=true);

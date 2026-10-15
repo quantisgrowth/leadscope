@@ -1,5 +1,9 @@
 # Instalação: histórico, pastas e convites
 
+## Biblioteca de abordagens por produto
+
+Veja [Biblioteca de abordagens](BIBLIOTECA_ABORDAGENS.md). Com o SQL 05 já instalado, aplique somente **supabase/manual/06_approach_library.sql** no SQL Editor do Supabase e atualize o LeadScope. Esta etapa não exige republicar funções nem consome créditos. O SQL não altera mensagens ou pesquisas anteriores.
+
 ## Nova atualização: pesquisas e dashboard
 
 Veja [Pesquisas rastreáveis e dashboard visual](PESQUISAS_E_DASHBOARD.md). Na conta que já tem SQLs 01–04, aplique **somente o SQL 05_radar_results.sql** e publique as funções pela Actions na main, confirmando também o novo campo de instalação do SQL 05. Não repita os SQLs antigos.

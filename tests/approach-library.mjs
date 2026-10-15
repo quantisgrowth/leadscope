@@ -1,0 +1,100 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+const read=p=>fs.readFileSync(new URL('../'+p,import.meta.url),'utf8');
+const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
+const school={id:'school',radarId:'radar',nome:'Tenaz Idiomas',cidade:'Tatuí',segmento:'Escola de idiomas',mensagemGerada:'Texto antigo',mensagemTom:'direto'};
+const fluency={id:'s1',radar_id:'radar',snapshot:{name:'Agendar demonstração',revision:1,offer_id:'fluency',product:'Fluency AI',benefit:'Atender alunos',channel:'whatsapp',tone:'informal',body:'Olá, {empresa}! O {produto} ajuda a {beneficio} em {cidade}.'}};
+const lift={id:'s2',radar_id:'radar',snapshot:{...fluency.snapshot,name:'Gestão',offer_id:'lift',product:'Quantis Lift',benefit:'Organizar contratos',tone:'consultivo'}};
+const state={companies:[school],diagTone:'direto',readOnly:false,userId:'owner',radarApproaches:[fluency,lift,{...lift,id:'foreign',radar_id:'other'}],offers:[],approachModels:[],approachLibraryReady:true};
+const ctx=vm.createContext({Map,Set,state,esc,document:{getElementById:()=>null}});
+vm.runInContext(read('approach-library.js')+read('approach.js'),ctx);ctx.c=school;
+assert.equal(ctx.libraryChoices(school).length,2);assert.equal(ctx.approachMessage(school,'direto'),'Texto antigo');
+vm.runInContext("librarySelections.set('school','s1')",ctx);
+assert.equal(ctx.approachMessage(school,'informal'),'Olá, Tenaz Idiomas! O Fluency AI ajuda a Atender alunos em Tatuí.');
+assert.ok(!ctx.approachMessage(school,'informal').includes('Quantis'));assert.equal(ctx.nextApproachSuggestion(school,'informal'),false);
+vm.runInContext("approachDrafts.set(approachKey(c,'informal'),{text:'Rascunho Fluency'});librarySelections.set('school','s2')",ctx);
+assert.ok(ctx.approachMessage(school,'consultivo').includes('Quantis Lift'));assert.ok(!ctx.approachMessage(school,'consultivo').includes('Rascunho'));
+vm.runInContext("librarySelections.set('school','s1')",ctx);assert.equal(ctx.approachMessage(school,'informal'),'Rascunho Fluency');
+assert.equal(school.mensagemGerada,'Texto antigo');
+assert.deepEqual(Array.from(ctx.fillLibraryBody('{cidade} {beneficio}',{},{benefit:''}).missing),['cidade','beneficio']);
+assert.throws(()=>ctx.validateLibraryBody('Olá {desconhecido}, {produto}'));assert.throws(()=>ctx.validateLibraryBody('Sem produto'));ctx.validateLibraryBody('{empresa} {produto}');
+assert.ok(ctx.renderLibraryPicker(school).includes('Fluency AI'));assert.ok(!ctx.renderLibraryPicker(school).includes('foreign'));
+assert.ok(ctx.renderApproachOfferContext(school,'informal').includes('Fluency AI'));
+new vm.Script(read('index.html').match(/<script>([\s\S]*?)<\/script>/)[1]);
+console.log('Library unit tests: product isolation, multiple selections, substitutions/missing data, saved text/drafts, archived snapshots and syntax passed.');
+
+if(process.env.LEADSCOPE_BROWSER_QA){
+  const {chromium}=await import(process.env.LEADSCOPE_PLAYWRIGHT),browser=await chromium.launch({headless:true,executablePath:process.env.LEADSCOPE_CHROME});
+  const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const models=[...Array.from({length:5},(_,i)=>({id:'f'+i,offer_id:'fluency',name:'Fluency '+(i+1),niches:'Escolas de idiomas',channel:'whatsapp',tone:'informal',body:'Olá {empresa}! {produto}: {beneficio}',active:true,revision:1})),...Array.from({length:2},(_,i)=>({id:'l'+i,offer_id:'lift',name:'Lift '+(i+1),niches:'Locadoras',channel:'email',tone:'consultivo',body:'Olá {empresa}! {produto}: {beneficio}',active:true,revision:1}))];
+  const boot=`const state=${JSON.stringify({...state,approachModels:models,offers:[{id:'fluency',nome:'Fluency AI',resultado:'Atender alunos',ativo:true},{id:'lift',nome:'Quantis Lift',resultado:'Organizar contratos',ativo:true}]})};let currentDiagId='school',view='library',saveArgs=null;const esc=${esc.toString()},toast=()=>{},fmtDateTime=s=>s;
+    const sb={from(table){let payload,filters=[],operation;const query={insert(p){payload=p;operation='insert';return query;},update(p){payload=p;operation='update';return query;},eq(k,v){filters.push([k,v]);return query;},order(){return query;},limit(){return query;},select(){return query;},then(resolve){if(table==='approach_models'&&operation){const row=operation==='update'?state.approachModels.find(m=>filters.every(([k,v])=>m[k]===v)):null;if(operation==='insert'){payload.id='new'+state.approachModels.length;payload.revision=1;state.approachModels.push(payload);}else if(row){Object.assign(row,payload,{revision:row.revision+1});}return Promise.resolve({data:operation==='insert'?[payload]:row?[row]:[],error:null}).then(resolve);}return Promise.resolve({data:[],error:null}).then(resolve);}};return query;},async rpc(name,args){saveArgs={name,args};return {error:null};}};
+    ${read('approach-library.js')}${read('approach.js')}
+    async function loadAllData(){render();}
+    function render(next){if(next)view=next;const c=state.companies[0];document.getElementById('root').innerHTML='<nav class="row gap-8 wrap"><button id="libraryNav" class="btn">Biblioteca</button><button id="radarNav" class="btn">Radar</button><button id="diagNav" class="btn">Diagnóstico</button></nav><section class="card" style="margin-top:16px">'+(view==='library'?renderApproachLibrary():view==='radar'?state.offers.map(o=>'<label class="checkbox-row"><input type="checkbox" data-radar-offer value="'+o.id+'" checked>'+esc(o.nome)+'</label>').join('')+renderRadarModelPicker():renderLibraryPicker(c)+renderApproachOfferContext(c,state.diagTone)+'<div id="msgBox" class="message-box">'+esc(approachMessage(c,state.diagTone))+'</div><button class="btn" id="regenMsg">Outra sugestão</button><button class="btn" id="saveMsg">Salvar versão</button><div id="approachHistory"></div>')+'</section>';document.getElementById('libraryNav').onclick=()=>render('library');document.getElementById('radarNav').onclick=()=>render('radar');document.getElementById('diagNav').onclick=()=>render('diag');if(view==='library')bindApproachLibrary();if(view==='radar')bindRadarModelPicker();if(view==='diag')bindApproach();}render();`;
+  const html=read('index.html');await page.route('**/*',r=>r.fulfill({contentType:'text/html; charset=utf-8',body:'<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+html.match(/<style>[\s\S]*?<\/style>/)[0]+'</head><body><main id="root" style="padding:16px;min-width:0"></main><script>'+boot+'</script></body></html>'}));
+  await page.goto('http://localhost:43139');await page.locator('#newApproachModel').click();await page.locator('#modelName').fill('Convite para demonstração');await page.locator('#modelOffer').selectOption('fluency');await page.locator('#modelNiches').fill('Escolas de idiomas');assert.ok((await page.locator('#modelPreview').innerText()).includes('Fluency AI'));await page.locator('#modelSubmit').click();await page.locator('dialog').waitFor({state:'detached'});assert.equal(await page.locator('[data-library-row]').count(),8);
+  await page.locator('[data-library-copy="f0"]').click();assert.equal(await page.locator('#modelName').inputValue(),'Fluency 1 — cópia');await page.locator('#modelCancel').click();
+  await page.locator('#libraryFilter').fill('Locadoras');assert.equal(await page.locator('[data-library-row]:visible').count(),2);
+  await page.locator('#radarNav').click();assert.equal(await page.locator('[data-radar-model]').count(),8);
+  await page.locator('[data-radar-model][value="f0"]').check();await page.locator('[data-radar-model][value="f1"]').check();await page.locator('[data-radar-model][value="l0"]').check();assert.equal(await page.evaluate(()=>radarChosenModels().length),3);
+  await page.locator('#radarModelSearch').fill('Locadoras');assert.equal(await page.locator('[data-radar-model]').count(),2);assert.equal(await page.evaluate(()=>radarChosenModels().length),3);
+  await page.locator('[data-radar-offer][value="lift"]').uncheck();assert.equal(await page.evaluate(()=>radarChosenModels().length),2);
+  await page.locator('#diagNav').click();assert.equal(await page.locator('#msgBox').innerText(),'Texto antigo');await page.locator('#diagnosticApproach').selectOption('s1');assert.ok((await page.locator('#msgBox').innerText()).includes('Fluency AI'));assert.equal(await page.locator('#regenMsg').isEnabled(),false);
+  await page.locator('#msgBox').fill('Texto editado para Fluency AI');await page.locator('#saveMsg').click();assert.equal(await page.evaluate(()=>saveArgs.name),'save_library_approach');assert.equal(await page.evaluate(()=>saveArgs.args.p_selection),'s1');
+  await page.locator('#diagnosticApproach').selectOption('s2');assert.ok((await page.locator('#msgBox').innerText()).includes('Quantis Lift'));await page.locator('#diagnosticApproach').selectOption('s1');assert.equal(await page.locator('#msgBox').innerText(),'Texto editado para Fluency AI');
+  for(const width of [1440,390]){await page.setViewportSize({width,height:1000});for(const theme of ['light','dark']){await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);await page.locator('#libraryNav').click();await page.locator('#newApproachModel').click();await page.locator('#modelOffer').selectOption('fluency');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:'/tmp/leadscope-library-'+width+'-'+theme+'.png'});await page.locator('#modelCancel').click();await page.locator('#radarNav').click();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);}}
+  await page.evaluate(()=>{state.readOnly=true;render('library');});assert.equal(await page.locator('#newApproachModel').isEnabled(),false);assert.equal(await page.locator('[data-library-edit]:enabled').count(),0);
+  assert.deepEqual(errors,[]);await browser.close();console.log('Library browser QA: modal creation/duplication/preview, 5+2 models, search, multi-product selection, isolated diagnostic drafts, provenance save and mobile/desktop light/dark passed.');
+}
+
+if(process.env.LEADSCOPE_PGLITE){
+  const {PGlite}=await import(process.env.LEADSCOPE_PGLITE),db=new PGlite();
+  const owner='00000000-0000-0000-0000-000000000001',other='00000000-0000-0000-0000-000000000002';
+  const offer='10000000-0000-0000-0000-000000000001',offer2='10000000-0000-0000-0000-000000000002',radar='20000000-0000-0000-0000-000000000001',company='30000000-0000-0000-0000-000000000001';
+  await db.exec(`create role authenticated;create role anon;create schema auth;
+    create table auth.users(id uuid primary key);insert into auth.users values('${owner}'),('${other}');
+    create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('test.uid',true),'')::uuid$$;
+    create function public.current_account_id() returns uuid language sql stable as $$select coalesce(nullif(current_setting('test.account',true),'')::uuid,auth.uid())$$;
+    create function public.current_account_can_write() returns boolean language sql stable as $$select coalesce(current_setting('test.write',true),'false')='true'$$;
+    grant usage on schema public,auth to authenticated,anon;
+    create table public.offers(id uuid primary key,user_id uuid,nome text,resultado text,ativo boolean default true);
+    create table public.radares(id uuid primary key,user_id uuid);
+    create table public.radar_runs(id uuid primary key,radar_id uuid,user_id uuid);
+    create table public.radar_offers(user_id uuid,radar_id uuid,offer_id uuid);
+    create table public.company_offer_matches(user_id uuid,empresa_id uuid,radar_id uuid,offer_id uuid);
+    create table public.empresas(id uuid primary key,user_id uuid,radar_id uuid,mensagem_gerada text,mensagem_tom text,mensagem_utilizada boolean);
+    insert into public.offers values('${offer}','${owner}','Fluency AI','Atender alunos',true),('${offer2}','${other}','Outro produto','Outro resultado',true);
+    insert into public.radares values('${radar}','${owner}');
+    insert into public.radar_offers values('${owner}','${radar}','${offer}');
+    insert into public.empresas values('${company}','${owner}','${radar}','Texto anterior','direto',false);`);
+  for(const table of ['offers','radares','radar_runs','radar_offers','company_offer_matches','empresas'])await db.exec(`alter table public.${table} enable row level security;grant select,insert,update on public.${table} to authenticated;
+    create policy fixture_read on public.${table} for select to authenticated using(user_id=public.current_account_id());
+    create policy fixture_write on public.${table} for all to authenticated using(user_id=public.current_account_id() and public.current_account_can_write()) with check(user_id=public.current_account_id() and public.current_account_can_write());`);
+  const previous=read('supabase/manual/05_radar_results.sql');await db.exec(previous.slice(previous.indexOf('create table if not exists public.approach_message_versions')));
+  const sql=read('supabase/manual/06_approach_library.sql');await db.exec(sql);await db.exec(sql);
+  await db.exec(`set role authenticated;set test.uid='${owner}';set test.write='true'`);
+  const insert=async(o=offer)=>db.query("insert into public.approach_models(user_id,offer_id,name,channel,tone,body) values($1,$2,'Primeiro contato','whatsapp','informal','Olá {empresa}, {produto}: {beneficio}') returning *",[owner,o]);
+  const model=(await insert()).rows[0];assert.equal(model.revision,1);
+  await assert.rejects(()=>insert(offer2));
+  await assert.rejects(()=>db.query("insert into public.approach_models(user_id,offer_id,name,channel,tone,body) values($1,$2,'Inválido','whatsapp','direto','{produto} {senha}')",[owner,offer]));
+  const selected=(await db.query("insert into public.radar_approach_models(user_id,radar_id,model_id,snapshot) values($1,$2,$3,'{\"product\":\"Forged\"}') returning *",[owner,radar,model.id])).rows[0];
+  assert.equal(selected.snapshot.product,'Fluency AI');assert.equal(selected.snapshot.revision,1);
+  await db.query("update public.approach_models set body='{produto}: versão dois',active=false where id=$1",[model.id]);
+  assert.equal((await db.query('select revision from public.approach_models')).rows[0].revision,2);
+  assert.equal((await db.query('select snapshot from public.radar_approach_models')).rows[0].snapshot.body,model.body);
+  await assert.rejects(()=>db.query("update public.radar_approach_models set snapshot='{}'"));await assert.rejects(()=>db.query('delete from public.radar_approach_models'));
+  await db.query("select public.save_library_approach($1,'Olá Tenaz, Fluency AI','template',false,'Texto anterior',$2)",[company,selected.id]);
+  const history=(await db.query('select * from public.approach_message_versions order by model_context nulls first')).rows;
+  assert.equal(history.length,2);assert.equal(history[0].origin,'legacy');assert.equal(history[1].model_context.product,'Fluency AI');assert.equal(history[1].model_context.revision,1);
+  await assert.rejects(()=>db.query("select public.save_library_approach($1,'Conflito','edited',false,'Texto anterior',$2)",[company,selected.id]));
+  await db.exec("set test.write='false'");
+  await assert.rejects(()=>insert());assert.equal((await db.query("update public.approach_models set name='Não permitido' returning id")).rows.length,0);
+  await assert.rejects(()=>db.query("select public.save_library_approach($1,'Inválido','edited',true,'Olá Tenaz, Fluency AI',$2)",[company,selected.id]));
+  await db.exec(`set test.uid='${other}';set test.write='true'`);assert.equal((await db.query('select * from public.approach_models')).rows.length,0);assert.equal((await db.query('select * from public.radar_approach_models')).rows.length,0);
+  await assert.rejects(()=>db.query("select public.save_library_approach($1,'Inválido','edited',false,'Olá Tenaz, Fluency AI',$2)",[company,selected.id]));
+  await db.exec(`set test.account='${owner}';set test.write='true'`);assert.equal((await db.query('select * from public.approach_models')).rows.length,1);
+  await db.exec('reset role;set role anon');await assert.rejects(()=>db.query('select * from public.approach_models'));
+  await db.close();console.log('Library PostgreSQL tests: idempotence, RLS/tenant/team/read-only, validation, server snapshots, revision isolation, immutable history and edit conflicts passed.');
+}
