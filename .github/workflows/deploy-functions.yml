@@ -55,6 +55,7 @@ jobs:
           node tests/radar-results.mjs
           node tests/approach-product.mjs
           node tests/approach-library.mjs
+          node tests/radar-category-picker.mjs
       - uses: supabase/setup-cli@v1
         with:
           version: 2.119.0

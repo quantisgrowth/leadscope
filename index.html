@@ -1322,6 +1322,12 @@ function bindOnboarding(){
 function renderOverview(){ return renderDashboard(); }
 
 /* ================= RADAR ================= */
+let radarCategoryCloseTimer=null,radarCategoryBindings=null;
+function closeRadarCategorySuggestions(){
+  clearTimeout(radarCategoryCloseTimer);radarCategoryCloseTimer=null;
+  document.getElementById('rCategorySuggestions')?.classList.remove('show');
+  document.getElementById('rCategoryInput')?.setAttribute('aria-expanded','false');
+}
 function categoryCatalog(){
   const collected=state.companies.flatMap(company=>company.categorias||[company.segmento]);
   const unique=new Map();
@@ -1345,15 +1351,22 @@ function paintRadarCategorySuggestions(){
   const input=document.getElementById('rCategoryInput');
   const list=document.getElementById('rCategorySuggestions');
   if(!input||!list) return;
+  const atLimit=(radarCategories||[]).length>=5;
+  input.readOnly=atLimit;
+  input.placeholder=atLimit?'Limite de 5 categorias atingido':'Digite e pressione Enter';
+  if(atLimit){list.innerHTML='';closeRadarCategorySuggestions();return;}
   const matches=radarCategoryMatches(input.value);
   list.innerHTML=matches.map((category,index)=>`<div class="category-option ${index===0?'active':''}" data-category="${esc(category)}">${esc(category)}</div>`).join('');
-  list.classList.toggle('show',document.activeElement===input&&matches.length>0);
+  const visible=document.activeElement===input&&matches.length>0;
+  list.classList.toggle('show',visible);input.setAttribute('aria-expanded',String(visible));
+  clearTimeout(radarCategoryCloseTimer);radarCategoryCloseTimer=null;
+  if(visible)radarCategoryCloseTimer=setTimeout(closeRadarCategorySuggestions,5000);
 }
 function addRadarCategory(value){
   const category=String(value||'').trim();
   if(!category) return false;
   if((radarCategories||[]).some(item=>normalizeText(item)===normalizeText(category))) return true;
-  if((radarCategories||[]).length>=5){ toast('Você pode pesquisar até 5 categorias por radar.'); return false; }
+  if((radarCategories||[]).length>=5){closeRadarCategorySuggestions();toast('Você pode pesquisar até 5 categorias por radar.');return false;}
   radarCategories.push(category);
   const input=document.getElementById('rCategoryInput');
   if(input) input.value='';
@@ -1364,6 +1377,8 @@ function bindRadarCategoryPicker(){
   const picker=document.getElementById('rCategoryPicker');
   const input=document.getElementById('rCategoryInput');
   if(!picker||!input) return;
+  radarCategoryBindings?.abort();closeRadarCategorySuggestions();
+  radarCategoryBindings=new AbortController();const {signal}=radarCategoryBindings;
   paintRadarCategoryPicker();
   input.addEventListener('focus',paintRadarCategorySuggestions);
   input.addEventListener('input',paintRadarCategorySuggestions);
@@ -1375,15 +1390,22 @@ function bindRadarCategoryPicker(){
     }else if(event.key==='Backspace'&&!input.value&&radarCategories.length){
       radarCategories.pop(); paintRadarCategoryPicker();
     }else if(event.key==='Escape'){
-      document.getElementById('rCategorySuggestions').classList.remove('show');
+      closeRadarCategorySuggestions();
     }
   });
+  // Keep focus while choosing an option; otherwise blur can hide it before click.
+  picker.addEventListener('pointerdown',event=>{if(event.target.closest('[data-category]'))event.preventDefault();});
+  picker.addEventListener('focusout',event=>{if(!picker.contains(event.relatedTarget))closeRadarCategorySuggestions();});
+  document.addEventListener('pointerdown',event=>{
+    if(!picker.isConnected){radarCategoryBindings?.abort();closeRadarCategorySuggestions();return;}
+    if(!picker.contains(event.target))closeRadarCategorySuggestions();
+  },{capture:true,signal});
   picker.addEventListener('click',event=>{
     const option=event.target.closest('[data-category]');
     const remove=event.target.closest('[data-remove-category]');
     if(option) addRadarCategory(option.getAttribute('data-category'));
-    if(remove){ radarCategories.splice(Number(remove.getAttribute('data-remove-category')),1); paintRadarCategoryPicker(); }
-    if(!remove) input.focus();
+    if(remove){radarCategories.splice(Number(remove.getAttribute('data-remove-category')),1);paintRadarCategoryPicker();}
+    input.focus();paintRadarCategorySuggestions();
   });
 }
 function renderRadar(){
